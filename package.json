@@ -1,0 +1,36 @@
+{
+  "name": "splendor-web-v0",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.11 <21"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n server,client -c yellow,cyan \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:client": "vite --host 0.0.0.0 --port 5173",
+    "dev:server": "tsx watch src/server/server.ts",
+    "build": "npm run data:generate && npm run typecheck && vite build && tsc -p tsconfig.server.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "data:generate": "tsx scripts/convert-game-data.ts",
+    "start": "node dist-server/src/server/server.js"
+  },
+  "dependencies": {
+    "boardgame.io": "0.50.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.10",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "concurrently": "9.1.0",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3",
+    "vite": "4.5.5",
+    "vitest": "0.34.6"
+  }
+}

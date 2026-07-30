@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-server/
+coverage/
+.playwright-cli/
+.env
+.DS_Store
+*.log
+spl01_rules.pdf
