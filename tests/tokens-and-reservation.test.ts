@@ -146,7 +146,7 @@ describe('ten-token limit', () => {
 describe('reservation', () => {
   it('reserves a public card, refills its tier, and awards gold', () => {
     const state = createTestState();
-    const cardID = state.market[1][0];
+    const cardID = state.market[1][0]!;
     const replacement = state.decks[1][0];
     const result = applyMainAction(state, '0', '0', {
       type: 'reserveMarket',
@@ -185,7 +185,7 @@ describe('reservation', () => {
   it('rejects a fourth reservation, an empty deck, and a stale market ID', () => {
     const state = createTestState();
     state.players['0'].reservedCards = [1, 2, 3].map((tier) => ({
-      cardId: state.market[tier as 1 | 2 | 3][0],
+      cardId: state.market[tier as 1 | 2 | 3][0]!,
       tier: tier as 1 | 2 | 3,
       source: 'market' as const,
     }));

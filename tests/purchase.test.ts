@@ -17,7 +17,7 @@ import {
 describe('purchasing development cards', () => {
   it('accepts exact colored-token payment and refills the market', () => {
     const state = createTestState();
-    const cardID = state.market[1][0];
+    const cardID = state.market[1][0]!;
     const card = requireCard(cardID);
     state.players['0'].tokens = paymentForCost(card.cost);
     const replacement = state.decks[1][0];
@@ -41,7 +41,7 @@ describe('purchasing development cards', () => {
 
   it('applies permanent discounts and can make a purchase free', () => {
     const state = createTestState();
-    const cardID = state.market[1][0];
+    const cardID = state.market[1][0]!;
     const card = requireCard(cardID);
     grantBonuses(state, '0', card.cost, cardID);
     expect(effectiveCostForCard(state, '0', card)).toEqual({
@@ -61,8 +61,8 @@ describe('purchasing development cards', () => {
 
   it('uses gold for shortages and permits strategic gold use', () => {
     const state = createTestState();
-    const cardID = state.market[1].find((id) =>
-      Object.values(requireCard(id).cost).some((value) => value > 0),
+    const cardID = state.market[1].find((id): id is string =>
+      id !== null && Object.values(requireCard(id).cost).some((value) => value > 0),
     )!;
     const card = requireCard(cardID);
     state.players['0'].tokens = paymentForCost(card.cost);
@@ -86,7 +86,7 @@ describe('purchasing development cards', () => {
 
   it('computes a normal-first suggested payment', () => {
     const state = createTestState();
-    const card = requireCard(state.market[2][0]);
+    const card = requireCard(state.market[2][0]!);
     for (const color of NORMAL_COLORS) {
       state.players['0'].tokens[color] = Math.max(0, card.cost[color] - 1);
     }
@@ -102,7 +102,7 @@ describe('purchasing development cards', () => {
 
   it('rejects unaffordable, unowned, negative, and overpayments', () => {
     const state = createTestState();
-    const cardID = state.market[2][0];
+    const cardID = state.market[2][0]!;
     const card = requireCard(cardID);
     expect(
       applyMainAction(state, '0', '0', {

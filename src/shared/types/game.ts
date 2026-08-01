@@ -26,6 +26,34 @@ export interface ReservedDevelopmentCard {
   source: 'market' | 'deck';
 }
 
+export type MarketSlots = [
+  string | null,
+  string | null,
+  string | null,
+  string | null,
+];
+
+export type ActionAnimation =
+  | {
+      type: 'market-card';
+      action: 'purchase' | 'reserve';
+      playerID: PlayerID;
+      tier: Tier;
+      slotIndex: number;
+      cardId: string;
+      replacementCardId: string | null;
+    }
+  | {
+      type: 'reserve-deck';
+      playerID: PlayerID;
+      tier: Tier;
+    }
+  | {
+      type: 'reserved-purchase';
+      playerID: PlayerID;
+      cardId: string;
+    };
+
 export interface PlayerState {
   tokens: TokenCounts;
   purchasedCardIds: string[];
@@ -48,6 +76,7 @@ export interface ActionLogEntry {
     key: string;
     values: Record<string, unknown>;
   };
+  animation?: ActionAnimation;
 }
 
 export type PendingResolution =
@@ -81,7 +110,7 @@ export interface GameResult {
 export interface SplendorState {
   bank: TokenCounts;
   decks: Record<Tier, string[]>;
-  market: Record<Tier, string[]>;
+  market: Record<Tier, MarketSlots>;
   availableNobleIds: string[];
   players: Record<PlayerID, PlayerState>;
   playerOrder: PlayerID[];

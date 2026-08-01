@@ -2,6 +2,7 @@ import { emptyTokenCounts, NORMAL_COLORS } from '../constants/colors.js';
 import { cardsForTier, NOBLES } from '../data/gameData.js';
 import type {
   GameSetupRandom,
+  MarketSlots,
   PlayerState,
   SplendorState,
   Tier,
@@ -47,12 +48,12 @@ export const createInitialState = (
   );
 
   const decks = {} as Record<Tier, string[]>;
-  const market = {} as Record<Tier, string[]>;
+  const market = {} as Record<Tier, MarketSlots>;
   for (const tier of [1, 2, 3] as const) {
     const shuffled = random.Shuffle(
       cardsForTier(tier).map((card) => card.id),
     );
-    market[tier] = shuffled.slice(0, 4);
+    market[tier] = shuffled.slice(0, 4) as MarketSlots;
     decks[tier] = shuffled.slice(4);
   }
 

@@ -9,7 +9,7 @@ describe('hidden information', () => {
   it('hides deck order and opponents’ blind reservations', () => {
     const state = createTestState();
     const blindID = state.decks[1].shift()!;
-    const publicID = state.market[2][0];
+    const publicID = state.market[2][0]!;
     state.players['0'].reservedCards.push({
       cardId: blindID,
       tier: 1,
@@ -30,6 +30,21 @@ describe('hidden information', () => {
     expect(opponentView.players['0'].reservedCards[1].cardId).toBe(publicID);
     expect(opponentView.decks[1]).toHaveLength(state.decks[1].length);
     expect(new Set(opponentView.decks[1])).toEqual(new Set(['__hidden__']));
+  });
+
+  it('does not expose a blind reservation through animation metadata', () => {
+    const state = createTestState();
+    const blindID = state.decks[3][0];
+    const clientResult = Client({ game: { ...SplendorGame, setup: () => state }, numPlayers: 2 });
+    clientResult.start();
+    clientResult.updatePlayerID('0');
+    clientResult.moves.mainAction({ type: 'reserveDeck', tier: 3 });
+    const view = createPlayerView(clientResult.getState()!.G, '1');
+    const animation = view.actionLog.at(-1)?.animation;
+    expect(animation).toEqual({ type: 'reserve-deck', playerID: '0', tier: 3 });
+    expect(JSON.stringify(animation)).not.toContain(blindID);
+    expect(view.players['0'].reservedCards[0].cardId).toBeNull();
+    clientResult.stop();
   });
 
   it('does not mutate authoritative state while filtering', () => {
