@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { BoardProps } from 'boardgame.io/react';
+import type { TFunction } from 'i18next';
+import { useTranslation } from 'react-i18next';
 
 import { NORMAL_COLORS, TOKEN_COLORS } from '../../shared/constants/colors.js';
 import { requireCard, requireNoble } from '../../shared/data/gameData.js';
@@ -17,7 +19,9 @@ import type {
   Tier,
   TokenColor,
   TokenCounts,
+  ActionLogEntry,
 } from '../../shared/types/game.js';
+import { localizedError } from '../auth.js';
 import { matchShareURL } from '../session.js';
 import { DevelopmentCardView } from './DevelopmentCardView.js';
 import { PaymentPanel } from './PaymentPanel.js';
@@ -32,6 +36,8 @@ interface MoveAPI {
 
 export interface GameBoardProps extends BoardProps<SplendorState> {
   playerNames: Record<string, string>;
+  playerAvatars: Record<string, string>;
+  accountMenu: ReactNode;
   onLeaveMatch: () => void;
   onReturnToLobby: () => void;
   onPlayAgain: () => Promise<void>;
@@ -40,7 +46,24 @@ export interface GameBoardProps extends BoardProps<SplendorState> {
 const playerName = (
   names: Record<string, string>,
   playerID: string,
-): string => names[playerID] || `Player ${Number(playerID) + 1}`;
+  t: TFunction,
+): string => names[playerID] || t('common.player', { number: Number(playerID) + 1 });
+
+const formatActionLog = (entry: ActionLogEntry, t: TFunction): string => {
+  if (!entry.i18n) return entry.message;
+  const values = { ...entry.i18n.values } as Record<string, unknown>;
+  if (Array.isArray(values.colors)) {
+    values.colors = values.colors.map((color) => t(`colors.${String(color)}`)).join(', ');
+  }
+  if (typeof values.color === 'string') values.color = t(`colors.${values.color}`);
+  if (values.tokens && typeof values.tokens === 'object') {
+    values.tokens = Object.entries(values.tokens as Record<string, number>)
+      .filter(([, count]) => count > 0)
+      .map(([color, count]) => `${count} ${t(`colors.${color}`)}`)
+      .join(', ');
+  }
+  return t(`logs.${entry.i18n.key}`, values);
+};
 
 function PlayerSummary({
   state,
@@ -48,13 +71,16 @@ function PlayerSummary({
   name,
   isCurrent,
   isLocal,
+  avatarUrl,
 }: {
   state: SplendorState;
   id: string;
   name: string;
   isCurrent: boolean;
   isLocal: boolean;
+  avatarUrl: string;
 }) {
+  const { t } = useTranslation();
   const player = state.players[id];
   const bonuses = getBonuses(state, id);
   return (
@@ -64,23 +90,24 @@ function PlayerSummary({
       }`}
     >
       <div className="player-heading">
+        {avatarUrl && <img className="player-avatar" src={avatarUrl} alt="" />}
         <div>
           <strong>{name}</strong>
           <span>
-            Seat {Number(id) + 1}
-            {isLocal ? ' · You' : ''}
+            {t('game.seat', { number: Number(id) + 1 })}
+            {isLocal ? ` · ${t('common.you')}` : ''}
           </span>
         </div>
         <div className="score-pill">
           <strong>{getScore(state, id)}</strong>
-          <span>prestige</span>
+          <span>{t('game.prestige')}</span>
         </div>
       </div>
       <div className="player-stats">
-        <span>{player.purchasedCardIds.length} cards</span>
-        <span>{player.reservedCards.length} reserved</span>
-        <span>{totalTokens(player.tokens)} tokens</span>
-        <span>{player.nobleIds.length} nobles</span>
+        <span>{t('game.cards', { count: player.purchasedCardIds.length })}</span>
+        <span>{t('game.reserved', { count: player.reservedCards.length })}</span>
+        <span>{t('game.tokens', { count: totalTokens(player.tokens) })}</span>
+        <span>{t('game.nobles', { count: player.nobleIds.length })}</span>
       </div>
       <div className="mini-token-row" aria-label={`${name} tokens`}>
         {TOKEN_COLORS.map((color) => (
@@ -106,7 +133,7 @@ function PlayerSummary({
         <div className="public-reservations">
           {player.reservedCards.map((reserved, index) => (
             <span key={`${reserved.tier}-${reserved.cardId ?? index}`}>
-              {reserved.cardId ?? `Hidden tier ${reserved.tier}`}
+              {reserved.cardId ?? t('game.hiddenTier', { tier: reserved.tier })}
             </span>
           ))}
         </div>
@@ -152,6 +179,7 @@ function TokenTakePanel({
   enabled: boolean;
   onAction: (action: MainAction) => void;
 }) {
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<TokenColor[]>([]);
   useEffect(() => {
     setSelected([]);
@@ -191,22 +219,22 @@ function TokenTakePanel({
       : null;
   const guidance = !enabled
     ? playerID === currentPlayerID
-      ? 'Finish the required resolution first.'
-      : `Waiting for ${Number(currentPlayerID) + 1}'s turn.`
+      ? t('game.finishResolution')
+      : t('game.waitingTurn', { number: Number(currentPlayerID) + 1 })
     : action
       ? validation?.ok
         ? selected.length === 2
-          ? 'Ready: take two matching tokens.'
-          : 'Ready: take three different tokens.'
-        : validation?.errors[0].message
-      : 'Click one color twice, or choose three different colors.';
+          ? t('game.takeTwoReady')
+          : t('game.takeThreeReady')
+        : t('errors.INVALID_INPUT')
+      : t('game.chooseTokens');
 
   return (
     <section className="action-card">
       <div className="section-heading compact-heading">
         <div>
-          <span className="eyebrow">Main action</span>
-          <h2>Take gem tokens</h2>
+          <span className="eyebrow">{t('game.mainAction')}</span>
+          <h2>{t('game.takeTokens')}</h2>
         </div>
         {selected.length > 0 && (
           <button
@@ -214,7 +242,7 @@ function TokenTakePanel({
             className="text-button"
             onClick={() => setSelected([])}
           >
-            Clear
+            {t('game.clear')}
           </button>
         )}
       </div>
@@ -232,7 +260,7 @@ function TokenTakePanel({
               disabled={!enabled || state.bank[color] === 0}
               aria-pressed={count > 0}
             >
-              <span className="bank-token-name">{color}</span>
+              <span className="bank-token-name">{t(`colors.${color}`)}</span>
               <strong>{state.bank[color]}</strong>
               {count > 0 && <span className="selection-count">×{count}</span>}
             </button>
@@ -248,7 +276,7 @@ function TokenTakePanel({
           if (action) onAction(action);
         }}
       >
-        Confirm token action
+        {t('game.confirmTokens')}
       </button>
     </section>
   );
@@ -271,17 +299,18 @@ function MarketTier({
   onReserve: (tier: Tier, cardID: string) => void;
   onBlindReserve: (tier: Tier) => void;
 }) {
+  const { t } = useTranslation();
   const reserveCount =
     playerID === null ? 3 : state.players[playerID].reservedCards.length;
   const canReserve = interactive && reserveCount < 3;
   return (
     <section className="market-tier">
       <div className="tier-deck">
-        <span className="eyebrow">Development</span>
-        <h2>Tier {tier}</h2>
+        <span className="eyebrow">{t('game.development')}</span>
+        <h2>{t('game.tier', { tier })}</h2>
         <div className={`deck-stack deck-tier-${tier}`}>
           <span>{state.decks[tier].length}</span>
-          <small>remaining</small>
+          <small>{t('game.remaining')}</small>
         </div>
         <button
           type="button"
@@ -289,14 +318,14 @@ function MarketTier({
           disabled={!canReserve || state.decks[tier].length === 0}
           title={
             reserveCount >= 3
-              ? 'You already have three reserved cards.'
+              ? t('game.threeReserved')
               : state.decks[tier].length === 0
-                ? 'This deck is empty.'
-                : 'Reserve the hidden top card.'
+                ? t('game.deckEmpty')
+                : t('game.reserveHidden')
           }
           onClick={() => onBlindReserve(tier)}
         >
-          Reserve blind
+          {t('game.reserveBlind')}
         </button>
       </div>
       <div className="market-cards">
@@ -318,8 +347,8 @@ function MarketTier({
         })}
         {state.market[tier].length === 0 && (
           <div className="empty-market">
-            <strong>Tier exhausted</strong>
-            <span>No development cards remain.</span>
+            <strong>{t('game.tierExhausted')}</strong>
+            <span>{t('game.noCards')}</span>
           </div>
         )}
       </div>
@@ -338,11 +367,12 @@ function GameOverPanel({
   onPlayAgain: () => Promise<void>;
   onReturn: () => void;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (!state.result) return null;
   const winners = state.result.winners
-    .map((id) => playerName(names, id))
+    .map((id) => playerName(names, id, t))
     .join(' & ');
 
   return (
@@ -353,25 +383,25 @@ function GameOverPanel({
         aria-modal="true"
         aria-labelledby="game-over-title"
       >
-        <span className="eyebrow">Final standings</span>
+        <span className="eyebrow">{t('game.finalStandings')}</span>
         <h2 id="game-over-title">
-          {state.result.winners.length > 1 ? 'Shared victory' : 'Victory'}
+          {state.result.winners.length > 1 ? t('game.sharedVictory') : t('game.victory')}
         </h2>
         <p className="winner-line">{winners}</p>
         <div className="standings">
           {state.result.standings.map((standing, index) => (
             <div className="standing-row" key={standing.playerID}>
               <span className="standing-rank">{index + 1}</span>
-              <strong>{playerName(names, standing.playerID)}</strong>
-              <span>{standing.score} prestige</span>
-              <span>{standing.purchasedCardCount} cards</span>
+              <strong>{playerName(names, standing.playerID, t)}</strong>
+              <span>{t('game.standingPrestige', { count: standing.score })}</span>
+              <span>{t('game.standingCards', { count: standing.purchasedCardCount })}</span>
             </div>
           ))}
         </div>
         {error && <div className="inline-error">{error}</div>}
         <div className="modal-actions">
           <button type="button" className="button button-ghost" onClick={onReturn}>
-            Return to lobby
+            {t('game.returnLobby')}
           </button>
           <button
             type="button"
@@ -383,16 +413,12 @@ function GameOverPanel({
               try {
                 await onPlayAgain();
               } catch (caught) {
-                setError(
-                  caught instanceof Error
-                    ? caught.message
-                    : 'Could not create the rematch.',
-                );
+                setError(localizedError(caught));
                 setBusy(false);
               }
             }}
           >
-            {busy ? 'Preparing…' : 'Play again'}
+            {busy ? t('game.preparing') : t('game.playAgain')}
           </button>
         </div>
       </section>
@@ -401,6 +427,7 @@ function GameOverPanel({
 }
 
 export function GameBoard(props: GameBoardProps) {
+  const { t } = useTranslation();
   const {
     G,
     ctx,
@@ -409,6 +436,8 @@ export function GameBoard(props: GameBoardProps) {
     playerID,
     isConnected,
     playerNames,
+    playerAvatars,
+    accountMenu,
     onLeaveMatch,
     onReturnToLobby,
     onPlayAgain,
@@ -441,17 +470,17 @@ export function GameBoard(props: GameBoardProps) {
             ◆
           </div>
           <div>
-            <strong>Gem Council</strong>
-            <span>Match {matchID}</span>
+            <strong>{t('common.appName')}</strong>
+            <span>{t('common.match', { id: matchID })}</span>
           </div>
         </div>
         <div className="turn-banner">
           <span className={`connection-dot${isConnected ? ' online' : ''}`} />
           <div>
-            <span>{isLocalTurn ? 'Your turn' : 'Current player'}</span>
-            <strong>{playerName(playerNames, ctx.currentPlayer)}</strong>
+            <span>{isLocalTurn ? t('game.yourTurn') : t('game.currentPlayer')}</span>
+            <strong>{playerName(playerNames, ctx.currentPlayer, t)}</strong>
           </div>
-          {G.finalRound && <span className="final-badge">Final round</span>}
+          {G.finalRound && <span className="final-badge">{t('game.finalRound')}</span>}
         </div>
         <div className="header-actions">
           <button
@@ -463,15 +492,16 @@ export function GameBoard(props: GameBoardProps) {
               window.setTimeout(() => setCopied(false), 1800);
             }}
           >
-            {copied ? 'Link copied' : 'Copy invite'}
+            {copied ? t('game.linkCopied') : t('game.copyInvite')}
           </button>
           <button
             type="button"
             className="button button-quiet button-small"
             onClick={onLeaveMatch}
           >
-            Leave
+            {t('game.leave')}
           </button>
+          {accountMenu}
         </div>
       </header>
 
@@ -479,8 +509,8 @@ export function GameBoard(props: GameBoardProps) {
         <aside className="players-column">
           <div className="section-heading compact-heading">
             <div>
-              <span className="eyebrow">Table</span>
-              <h2>Players</h2>
+              <span className="eyebrow">{t('game.table')}</span>
+              <h2>{t('game.players')}</h2>
             </div>
           </div>
           <div className="player-list">
@@ -489,9 +519,10 @@ export function GameBoard(props: GameBoardProps) {
                 key={id}
                 state={G}
                 id={id}
-                name={playerName(playerNames, id)}
+                name={playerName(playerNames, id, t)}
                 isCurrent={ctx.currentPlayer === id}
                 isLocal={localID === id}
+                avatarUrl={playerAvatars[id] ?? ''}
               />
             ))}
           </div>
@@ -500,8 +531,8 @@ export function GameBoard(props: GameBoardProps) {
         <div className="board-column">
           <section className="bank-panel">
             <div>
-              <span className="eyebrow">Available supply</span>
-              <h2>Token bank</h2>
+              <span className="eyebrow">{t('game.supply')}</span>
+              <h2>{t('game.bank')}</h2>
             </div>
             <div className="bank-row">
               {TOKEN_COLORS.map((color) => (
@@ -513,17 +544,17 @@ export function GameBoard(props: GameBoardProps) {
           <section className="nobles-panel">
             <div className="section-heading compact-heading">
               <div>
-                <span className="eyebrow">Automatic visits</span>
-                <h2>Available nobles</h2>
+                <span className="eyebrow">{t('game.visits')}</span>
+                <h2>{t('game.availableNobles')}</h2>
               </div>
-              <span className="subtle-note">One maximum per turn</span>
+              <span className="subtle-note">{t('game.oneNoble')}</span>
             </div>
             <div className="nobles-row">
               {G.availableNobleIds.map((nobleID) => (
                 <NobleTile key={nobleID} nobleID={nobleID} />
               ))}
               {G.availableNobleIds.length === 0 && (
-                <p className="empty-copy">All nobles have been claimed.</p>
+                <p className="empty-copy">{t('game.noNobles')}</p>
               )}
             </div>
           </section>
@@ -569,8 +600,8 @@ export function GameBoard(props: GameBoardProps) {
           <section className="action-card reserved-section">
             <div className="section-heading compact-heading">
               <div>
-                <span className="eyebrow">Private hand</span>
-                <h2>Your reserved cards</h2>
+                <span className="eyebrow">{t('game.privateHand')}</span>
+                <h2>{t('game.yourReserved')}</h2>
               </div>
               <span className="count-badge">
                 {localPlayer?.reservedCards.length ?? 0}/3
@@ -599,14 +630,14 @@ export function GameBoard(props: GameBoardProps) {
                     />
                   ) : (
                     <div className="hidden-reserved" key={index}>
-                      Hidden tier {reserved.tier} card
+                      {t('game.hiddenCard', { tier: reserved.tier })}
                     </div>
                   );
                 })}
               </div>
             ) : (
               <p className="empty-copy">
-                Reserve a market card or draw blindly from a tier.
+                {t('game.reserveHelp')}
               </p>
             )}
           </section>
@@ -614,19 +645,19 @@ export function GameBoard(props: GameBoardProps) {
           <section className="action-card log-section">
             <div className="section-heading compact-heading">
               <div>
-                <span className="eyebrow">Public history</span>
-                <h2>Action log</h2>
+                <span className="eyebrow">{t('game.publicHistory')}</span>
+                <h2>{t('game.actionLog')}</h2>
               </div>
             </div>
             <ol className="action-log">
               {[...G.actionLog].reverse().map((entry) => (
                 <li key={entry.id}>
                   <span className={`log-dot log-${entry.kind}`} />
-                  {entry.message}
+                  {formatActionLog(entry, t)}
                 </li>
               ))}
               {G.actionLog.length === 0 && (
-                <li className="empty-copy">The first move will appear here.</li>
+                <li className="empty-copy">{t('game.firstMove')}</li>
               )}
             </ol>
           </section>

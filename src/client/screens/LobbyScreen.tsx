@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { LobbyAPI } from 'boardgame.io';
 import type { LobbyClient } from 'boardgame.io/client';
+import { useTranslation } from 'react-i18next';
 
-import { GAME_NAME, GAME_SERVER_URL } from '../config.js';
-import {
-  matchShareURL,
-  saveMatchSession,
-  type MatchSession,
-} from '../session.js';
+import { localizedError, useAuth } from '../auth.js';
+import { AccountMenu } from '../components/AccountMenu.js';
+import { GAME_NAME } from '../config.js';
+import { matchShareURL, type MatchSession } from '../session.js';
 
 interface LobbyScreenProps {
   lobby: LobbyClient;
@@ -18,15 +17,11 @@ interface LobbyScreenProps {
 const occupiedSeats = (match: LobbyAPI.Match): number =>
   match.players.filter((player) => Boolean(player.name)).length;
 
-export function LobbyScreen({
-  lobby,
-  inviteMatchID,
-  onSession,
-}: LobbyScreenProps) {
-  const [displayName, setDisplayName] = useState(
-    () => window.localStorage.getItem('gem-council-display-name') ?? '',
-  );
+export function LobbyScreen({ lobby, inviteMatchID, onSession }: LobbyScreenProps) {
+  const { t } = useTranslation();
+  const { user, request } = useAuth();
   const [playerCount, setPlayerCount] = useState(3);
+  const [isPrivate, setIsPrivate] = useState(false);
   const [matches, setMatches] = useState<LobbyAPI.Match[]>([]);
   const [inviteMatch, setInviteMatch] = useState<LobbyAPI.Match | null>(null);
   const [busy, setBusy] = useState('');
@@ -35,9 +30,7 @@ export function LobbyScreen({
 
   const refresh = useCallback(async () => {
     try {
-      const response = await lobby.listMatches(GAME_NAME, {
-        isGameover: false,
-      });
+      const response = await lobby.listMatches(GAME_NAME, { isGameover: false });
       setMatches(response.matches);
       if (inviteMatchID) {
         setInviteMatch(
@@ -49,11 +42,7 @@ export function LobbyScreen({
       }
       setError('');
     } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : `Cannot reach the game server at ${GAME_SERVER_URL}.`,
-      );
+      setError(localizedError(caught));
     }
   }, [inviteMatchID, lobby]);
 
@@ -63,80 +52,64 @@ export function LobbyScreen({
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const validName = displayName.trim().length > 0;
-
-  const rememberName = (): string => {
-    const name = displayName.trim().slice(0, 30);
-    window.localStorage.setItem('gem-council-display-name', name);
-    return name;
-  };
-
   const joinMatch = async (match: LobbyAPI.Match) => {
-    if (!validName) {
-      setError('Enter a display name before joining.');
-      return;
-    }
-    const openSeat = match.players.find((player) => !player.name);
-    if (!openSeat) {
-      setError('That match no longer has an open seat.');
-      await refresh();
-      return;
-    }
+    if (!user) return;
+    const ownedSeat = match.players.find(
+      (player) => (player.data as { userId?: string } | undefined)?.userId === user.id,
+    );
     setBusy(match.matchID);
     setError('');
     try {
-      const playerName = rememberName();
+      if (ownedSeat) {
+        const restored = await request<{ playerID: string; playerCredentials: string; playerName: string }>(
+          `/api/matches/${encodeURIComponent(match.matchID)}/reclaim`,
+          { method: 'POST' },
+        );
+        onSession({ matchID: match.matchID, ...restored });
+        return;
+      }
+      const openSeat = match.players.find((player) => !player.name);
+      if (!openSeat) throw new Error('MATCH_FULL');
       const joined = await lobby.joinMatch(GAME_NAME, match.matchID, {
         playerID: String(openSeat.id),
-        playerName,
+        playerName: user.username,
       });
-      const session: MatchSession = {
+      onSession({
         matchID: match.matchID,
         playerID: joined.playerID,
         playerCredentials: joined.playerCredentials,
-        playerName,
-      };
-      saveMatchSession(session);
-      onSession(session);
+        playerName: user.username,
+      });
     } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : 'Could not join the match.',
-      );
+      setError(caught instanceof Error && caught.message === 'MATCH_FULL'
+        ? t('errors.MATCH_FULL')
+        : localizedError(caught));
       setBusy('');
       await refresh();
     }
   };
 
   const createMatch = async () => {
-    if (!validName) {
-      setError('Enter a display name before creating a match.');
-      return;
-    }
+    if (!user) return;
     setBusy('create');
     setError('');
     try {
       const created = await lobby.createMatch(GAME_NAME, {
         numPlayers: playerCount,
+        unlisted: isPrivate,
       });
-      const playerName = rememberName();
       const joined = await lobby.joinMatch(GAME_NAME, created.matchID, {
         playerID: '0',
-        playerName,
+        playerName: user.username,
       });
-      const session: MatchSession = {
+      onSession({
         matchID: created.matchID,
         playerID: joined.playerID,
         playerCredentials: joined.playerCredentials,
-        playerName,
-      };
-      saveMatchSession(session);
-      onSession(session);
+        playerName: user.username,
+      });
     } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : 'Could not create the match.',
-      );
+      setError(localizedError(caught));
       setBusy('');
     }
   };
@@ -155,209 +128,80 @@ export function LobbyScreen({
     <div className="lobby-shell">
       <header className="lobby-header">
         <div className="brand-lockup">
-          <div className="brand-mark" aria-hidden="true">
-            ◆
-          </div>
-          <div>
-            <strong>Gem Council</strong>
-            <span>Browser multiplayer · Version 0</span>
-          </div>
+          <div className="brand-mark" aria-hidden="true">◆</div>
+          <div><strong>{t('common.appName')}</strong><span>{t('lobby.browserMultiplayer')}</span></div>
         </div>
-        <span className="server-chip">
-          <span className="connection-dot online" />
-          In-memory matches
-        </span>
+        <div className="header-account-row">
+          <span className="server-chip"><span className="connection-dot online" />{t('lobby.inMemory')}</span>
+          <AccountMenu />
+        </div>
       </header>
-
       <main className="lobby-main">
         <section className="lobby-hero">
-          <span className="eyebrow">Trade wisely. Build permanently.</span>
-          <h1>Turn raw gems into prestige.</h1>
-          <p>
-            Gather tokens, secure development cards, and earn noble visits in a
-            focused two-to-four-player strategy game.
-          </p>
-          <div className="hero-rule-row" aria-label="Game highlights">
-            <span>2–4 players</span>
-            <span>15 prestige wins</span>
-            <span>No account needed</span>
+          <span className="eyebrow">{t('lobby.eyebrow')}</span>
+          <h1>{t('lobby.title')}</h1>
+          <p>{t('lobby.intro')}</p>
+          <div className="hero-rule-row" aria-label={t('lobby.players24')}>
+            <span>{t('lobby.players24')}</span><span>{t('lobby.prestige15')}</span><span>{t('lobby.verifiedAccounts')}</span>
           </div>
         </section>
-
         <section className="lobby-card create-card">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">Your seat</span>
-              <h2>Start at the table</h2>
-            </div>
-            <span className="step-number">01</span>
-          </div>
-          <label className="field">
-            <span>Display name</span>
-            <input
-              value={displayName}
-              maxLength={30}
-              autoComplete="nickname"
-              placeholder="How should the table know you?"
-              onChange={(event) => setDisplayName(event.target.value)}
-            />
-          </label>
+          <div className="section-heading"><div><span className="eyebrow">{t('lobby.newTable')}</span><h2>{t('lobby.start')}</h2></div><span className="step-number">01</span></div>
           <fieldset className="player-count-field">
-            <legend>Seats in a new match</legend>
+            <legend>{t('lobby.seats')}</legend>
             <div className="segmented-control">
               {[2, 3, 4].map((count) => (
-                <button
-                  type="button"
-                  key={count}
-                  className={playerCount === count ? 'selected' : ''}
-                  aria-pressed={playerCount === count}
-                  onClick={() => setPlayerCount(count)}
-                >
-                  {count}
-                  <span>players</span>
+                <button type="button" key={count} className={playerCount === count ? 'selected' : ''} aria-pressed={playerCount === count} onClick={() => setPlayerCount(count)}>
+                  {count}<span>{t('lobby.players', { count })}</span>
                 </button>
               ))}
             </div>
           </fieldset>
-          <button
-            type="button"
-            className="button button-primary button-full"
-            disabled={busy !== '' || !validName}
-            onClick={() => void createMatch()}
-          >
-            {busy === 'create' ? 'Creating match…' : 'Create a private match'}
+          <fieldset className="visibility-field">
+            <legend>{t('lobby.visibility')}</legend>
+            {[false, true].map((privateRoom) => (
+              <label key={String(privateRoom)} className={isPrivate === privateRoom ? 'visibility-option selected' : 'visibility-option'}>
+                <input type="radio" name="visibility" checked={isPrivate === privateRoom} onChange={() => setIsPrivate(privateRoom)} />
+                <span><strong>{t(privateRoom ? 'lobby.private' : 'lobby.public')}</strong><small>{t(privateRoom ? 'lobby.privateHelp' : 'lobby.publicHelp')}</small></span>
+              </label>
+            ))}
+          </fieldset>
+          <button type="button" className="button button-primary button-full" disabled={busy !== ''} onClick={() => void createMatch()}>
+            {busy === 'create' ? t('lobby.creating') : t('lobby.create')}
           </button>
-          <p className="form-note">
-            You will receive a shareable link after the room is created.
-            Credentials stay only in this browser tab.
-          </p>
+          <p className="form-note">{t('lobby.createNote')}</p>
         </section>
-
         {inviteMatchID && (
           <section className="lobby-card invite-card">
-            <div className="section-heading">
-              <div>
-                <span className="eyebrow">Invitation</span>
-                <h2>Join shared match</h2>
-              </div>
-              <span className="step-number">02</span>
-            </div>
-            {inviteMatch ? (
-              <>
-                <div className="match-id-line">
-                  <span>Match</span>
-                  <strong>{inviteMatch.matchID}</strong>
-                </div>
-                <div className="seat-meter">
-                  <div>
-                    <strong>{occupiedSeats(inviteMatch)}</strong>
-                    <span>joined</span>
-                  </div>
-                  <div className="meter-track">
-                    <span
-                      style={{
-                        width: `${
-                          (occupiedSeats(inviteMatch) /
-                            inviteMatch.players.length) *
-                          100
-                        }%`,
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <strong>{inviteMatch.players.length}</strong>
-                    <span>seats</span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="button button-primary button-full"
-                  disabled={
-                    busy !== '' ||
-                    !validName ||
-                    occupiedSeats(inviteMatch) === inviteMatch.players.length
-                  }
-                  onClick={() => void joinMatch(inviteMatch)}
-                >
-                  {busy === inviteMatch.matchID
-                    ? 'Joining…'
-                    : 'Claim an open seat'}
-                </button>
-              </>
-            ) : (
-              <p className="empty-copy">Looking up the shared match…</p>
-            )}
+            <div className="section-heading"><div><span className="eyebrow">{t('lobby.invitation')}</span><h2>{t('lobby.joinShared')}</h2></div><span className="step-number">02</span></div>
+            {inviteMatch ? <>
+              <div className="match-id-line"><span>{t('lobby.matchID')}</span><strong>{inviteMatch.matchID}</strong></div>
+              <div className="seat-meter"><div><strong>{occupiedSeats(inviteMatch)}</strong><span>{t('lobby.joined')}</span></div><div className="meter-track"><span style={{ width: `${(occupiedSeats(inviteMatch) / inviteMatch.players.length) * 100}%` }} /></div><div><strong>{inviteMatch.players.length}</strong><span>{t('lobby.seatCount')}</span></div></div>
+              <button type="button" className="button button-primary button-full" disabled={busy !== '' || (!inviteMatch.players.some((player) => !player.name) && !inviteMatch.players.some((player) => (player.data as { userId?: string } | undefined)?.userId === user?.id))} onClick={() => void joinMatch(inviteMatch)}>
+                {busy === inviteMatch.matchID ? t('lobby.joining') : t('lobby.claim')}
+              </button>
+            </> : <p className="empty-copy">{t('lobby.lookup')}</p>}
           </section>
         )}
-
         <section className="lobby-card matches-card">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">Open tables</span>
-              <h2>Join a waiting match</h2>
-            </div>
-            <button
-              type="button"
-              className="text-button"
-              onClick={() => void refresh()}
-            >
-              Refresh
-            </button>
-          </div>
+          <div className="section-heading"><div><span className="eyebrow">{t('lobby.openTables')}</span><h2>{t('lobby.joinWaiting')}</h2></div><button type="button" className="text-button" onClick={() => void refresh()}>{t('common.refresh')}</button></div>
           <div className="match-list">
             {openMatches.map((match) => (
               <article className="match-row" key={match.matchID}>
-                <div className="match-emblem" aria-hidden="true">
-                  {match.players.length}
-                </div>
-                <div className="match-info">
-                  <strong>{match.matchID}</strong>
-                  <span>
-                    {occupiedSeats(match)} of {match.players.length} seats
-                    claimed
-                  </span>
-                </div>
+                <div className="match-emblem" aria-hidden="true">{match.players.length}</div>
+                <div className="match-info"><strong>{match.matchID}</strong><span>{t('lobby.seatsClaimed', { occupied: occupiedSeats(match), total: match.players.length })}</span></div>
                 <div className="match-row-actions">
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={`Copy invite link for ${match.matchID}`}
-                    onClick={() => void copyInvite(match.matchID)}
-                  >
-                    {copied === match.matchID ? '✓' : '↗'}
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-ghost button-small"
-                    disabled={busy !== '' || !validName}
-                    onClick={() => void joinMatch(match)}
-                  >
-                    Join
-                  </button>
+                  <button type="button" className="icon-button" aria-label={t('lobby.copyInviteFor', { id: match.matchID })} onClick={() => void copyInvite(match.matchID)}>{copied === match.matchID ? '✓' : '↗'}</button>
+                  <button type="button" className="button button-ghost button-small" disabled={busy !== ''} onClick={() => void joinMatch(match)}>{t('lobby.join')}</button>
                 </div>
               </article>
             ))}
-            {openMatches.length === 0 && (
-              <div className="empty-state">
-                <span aria-hidden="true">◇</span>
-                <strong>No open matches yet</strong>
-                <p>Create one above and invite friends with the share link.</p>
-              </div>
-            )}
+            {openMatches.length === 0 && <div className="empty-state"><span aria-hidden="true">◇</span><strong>{t('lobby.noMatches')}</strong><p>{t('lobby.noMatchesHelp')}</p></div>}
           </div>
         </section>
-
-        {error && (
-          <div className="lobby-error" role="alert">
-            <strong>Couldn’t complete that request</strong>
-            <span>{error}</span>
-          </div>
-        )}
+        {error && <div className="lobby-error" role="alert"><strong>{t('lobby.requestFailed')}</strong><span>{error}</span></div>}
       </main>
-      <footer className="lobby-footer">
-        <span>Matches disappear when the server restarts.</span>
-        <span>No official artwork is included.</span>
-      </footer>
+      <footer className="lobby-footer"><span>{t('lobby.disappears')}</span><span>{t('lobby.noArtwork')}</span></footer>
     </div>
   );
 }

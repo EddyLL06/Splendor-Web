@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import {
   NORMAL_COLORS,
@@ -29,6 +30,7 @@ export function DiscardPanel({
   currentPlayerID,
   onConfirm,
 }: DiscardPanelProps) {
+  const { t } = useTranslation();
   const [returned, setReturned] = useState(() =>
     suggestedDiscard(state, playerID),
   );
@@ -68,12 +70,9 @@ export function DiscardPanel({
         aria-modal="true"
         aria-labelledby="discard-title"
       >
-        <span className="eyebrow">Mandatory resolution</span>
-        <h2 id="discard-title">Return exactly {required} tokens</h2>
-        <p className="modal-copy">
-          You have more than ten tokens. Gold counts toward the limit and may
-          also be returned.
-        </p>
+        <span className="eyebrow">{t('game.mandatory')}</span>
+        <h2 id="discard-title">{t('game.returnExactly', { count: required })}</h2>
+        <p className="modal-copy">{t('game.returnHelp')}</p>
         <div className="discard-grid">
           {TOKEN_COLORS.map((color) => (
             <div className="discard-control" key={color}>
@@ -86,7 +85,7 @@ export function DiscardPanel({
                   type="button"
                   onClick={() => adjust(color, -1)}
                   disabled={returned[color] === 0}
-                  aria-label={`Return one fewer ${color} token`}
+                  aria-label={t('game.returnFewer', { color: t(`colors.${color}`) })}
                 >
                   −
                 </button>
@@ -97,7 +96,7 @@ export function DiscardPanel({
                   disabled={
                     returned[color] >= state.players[playerID].tokens[color]
                   }
-                  aria-label={`Return one more ${color} token`}
+                  aria-label={t('game.returnMore', { color: t(`colors.${color}`) })}
                 >
                   +
                 </button>
@@ -106,10 +105,10 @@ export function DiscardPanel({
           ))}
         </div>
         <div className="resolution-total">
-          Selected <strong>{selected}</strong> of <strong>{required}</strong>
+          {t('game.selected', { selected, required })}
         </div>
         {!validation.ok && (
-          <div className="inline-error">{validation.errors[0].message}</div>
+          <div className="inline-error">{t('errors.INVALID_INPUT')}</div>
         )}
         <div className="modal-actions">
           <button
@@ -118,7 +117,7 @@ export function DiscardPanel({
             disabled={!validation.ok}
             onClick={() => onConfirm(returned)}
           >
-            Return tokens
+            {t('game.returnTokens')}
           </button>
         </div>
       </section>
@@ -132,6 +131,7 @@ interface NoblePanelProps {
 }
 
 export function NoblePanel({ nobleIDs, onChoose }: NoblePanelProps) {
+  const { t } = useTranslation();
   return (
     <div className="modal-backdrop">
       <section
@@ -140,12 +140,9 @@ export function NoblePanel({ nobleIDs, onChoose }: NoblePanelProps) {
         aria-modal="true"
         aria-labelledby="noble-title"
       >
-        <span className="eyebrow">A noble visits</span>
-        <h2 id="noble-title">Choose one noble</h2>
-        <p className="modal-copy">
-          You qualify for more than one. Select the single noble you will
-          receive this turn.
-        </p>
+        <span className="eyebrow">{t('game.nobleVisits')}</span>
+        <h2 id="noble-title">{t('game.chooseNoble')}</h2>
+        <p className="modal-copy">{t('game.nobleHelp')}</p>
         <div className="noble-choice-grid">
           {nobleIDs.map((nobleID) => {
             const noble = requireNoble(nobleID);

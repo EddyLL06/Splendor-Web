@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { NORMAL_COLORS } from '../../shared/constants/colors.js';
 import {
@@ -31,6 +32,7 @@ export function PaymentPanel({
   onCancel,
   onConfirm,
 }: PaymentPanelProps) {
+  const { t } = useTranslation();
   const initial = useMemo(
     () => analyzePayment(state, playerID, card).suggestedPayment,
     [card, playerID, state],
@@ -71,13 +73,13 @@ export function PaymentPanel({
       >
         <div className="modal-heading">
           <div>
-            <span className="eyebrow">Purchase {card.id}</span>
-            <h2 id="payment-title">Choose your payment</h2>
+            <span className="eyebrow">{t('game.purchase', { id: card.id })}</span>
+            <h2 id="payment-title">{t('game.choosePayment')}</h2>
           </div>
           <button
             type="button"
             className="icon-button"
-            aria-label="Close payment panel"
+            aria-label={t('game.closePayment')}
             onClick={onCancel}
           >
             ×
@@ -86,26 +88,26 @@ export function PaymentPanel({
 
         <div className="payment-summary">
           <div>
-            <span>Prestige</span>
+            <span>{t('game.prestige')}</span>
             <strong>{card.points} ◆</strong>
           </div>
           <div>
-            <span>Bonus</span>
+            <span>{t('game.bonus')}</span>
             <TokenBadge color={card.bonus} count={1} compact />
           </div>
           <div>
-            <span>Gold available</span>
+            <span>{t('game.goldAvailable')}</span>
             <strong>{state.players[playerID].tokens.gold}</strong>
           </div>
         </div>
 
         <div className="payment-table">
           <div className="payment-row payment-header" aria-hidden="true">
-            <span>Gem</span>
-            <span>Printed</span>
-            <span>Bonus</span>
-            <span>Effective</span>
-            <span>Pay</span>
+            <span>{t('game.gem')}</span>
+            <span>{t('game.printed')}</span>
+            <span>{t('game.bonus')}</span>
+            <span>{t('game.effective')}</span>
+            <span>{t('game.pay')}</span>
           </div>
           {NORMAL_COLORS.map((color) => (
             <div className="payment-row" key={color}>
@@ -116,7 +118,7 @@ export function PaymentPanel({
               <span className="stepper">
                 <button
                   type="button"
-                  aria-label={`Use one fewer ${color} token`}
+                  aria-label={t('game.fewerToken', { color: t(`colors.${color}`) })}
                   onClick={() => adjust(color, -1)}
                   disabled={coloredPayment[color] === 0}
                 >
@@ -125,7 +127,7 @@ export function PaymentPanel({
                 <strong>{coloredPayment[color]}</strong>
                 <button
                   type="button"
-                  aria-label={`Use one more ${color} token`}
+                  aria-label={t('game.moreToken', { color: t(`colors.${color}`) })}
                   onClick={() => adjust(color, 1)}
                   disabled={
                     coloredPayment[color] >=
@@ -145,22 +147,20 @@ export function PaymentPanel({
         <div className="gold-payment">
           <TokenBadge color="gold" count={payment.gold} />
           <div>
-            <strong>Gold jokers in this payment</strong>
-            <p>
-              Reduce a colored payment above to substitute gold strategically.
-            </p>
+            <strong>{t('game.goldPayment')}</strong>
+            <p>{t('game.goldHelp')}</p>
           </div>
         </div>
 
         {analysis.errors.length > 0 && (
           <div className="inline-error" role="alert">
-            {analysis.errors[0].message}
+            {t('errors.INVALID_INPUT')}
           </div>
         )}
 
         <div className="modal-actions">
           <button type="button" className="button button-ghost" onClick={onCancel}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -168,7 +168,7 @@ export function PaymentPanel({
             disabled={analysis.errors.length > 0}
             onClick={() => onConfirm(location, payment)}
           >
-            Confirm purchase
+            {t('game.confirmPurchase')}
           </button>
         </div>
       </section>

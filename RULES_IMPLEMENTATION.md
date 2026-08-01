@@ -1,6 +1,6 @@
 # Rules implementation
 
-This document maps the supplied base-game rulebook and Version 0 specification
+This document maps the supplied base-game rulebook and Version 1 implementation
 to the implementation. The authoritative rule pipeline lives in
 `src/shared/rules/engine.ts`; derived scores, bonuses, eligibility, and payments
 live in `src/shared/rules/selectors.ts`.
@@ -37,7 +37,7 @@ declared counts before generating stable IDs.
 6. always creates five gold jokers; and
 7. gives every player empty tokens, cards, reservations, and nobles.
 
-The physical rule gives the youngest player the first turn. Version 0 does not
+The physical rule gives the youngest player the first turn. Gem Council does not
 collect ages, so setup uses boardgame.io’s authoritative random die to choose
 the first player. `initialFirstPlayer` is stored in state and used by the custom
 turn order.
@@ -153,7 +153,7 @@ Final standings use:
 3. if both values are still tied, every tied player is a shared winner.
 
 The third step is a documented digital interpretation: the printed rulebook
-defines no further tiebreak, so Version 0 does not invent one.
+defines no further tiebreak, so Gem Council does not invent one.
 
 ## Invalid moves and state safety
 

@@ -2,7 +2,17 @@ node_modules/
 dist/
 dist-server/
 coverage/
+.codegraph/
+.local-data/
 .playwright-cli/
+output/playwright/
+playwright-report/
+test-results/
+src/generated/prisma/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
 .env
 .DS_Store
 *.log

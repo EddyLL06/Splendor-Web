@@ -2020,3 +2020,367 @@ h2 {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Accounts and localization */
+
+.language-switcher {
+  display: inline-flex;
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 999px;
+}
+
+.language-switcher button {
+  min-width: 42px;
+  min-height: 30px;
+  padding: 0 9px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+  opacity: 0.66;
+}
+
+.language-switcher button.selected {
+  color: var(--forest);
+  background: #fffdf7;
+  box-shadow: 0 2px 10px rgba(5, 20, 15, 0.18);
+  opacity: 1;
+}
+
+.account-menu,
+.header-account-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.account-identity {
+  display: inline-flex;
+  min-height: 38px;
+  padding: 4px 11px 4px 5px;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.account-identity img,
+.seat-avatar,
+.player-avatar {
+  width: 29px;
+  height: 29px;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.profile-modal {
+  max-width: 600px;
+}
+
+.profile-avatar-row {
+  display: grid;
+  margin: 18px 0 24px;
+  align-items: center;
+  grid-template-columns: 110px 1fr;
+  gap: 20px;
+}
+
+.profile-avatar-large {
+  width: 104px;
+  height: 104px;
+  object-fit: cover;
+  border: 4px solid white;
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+}
+
+.profile-avatar-row p {
+  margin: 5px 0 12px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file-button {
+  display: inline-flex;
+  align-items: center;
+}
+
+.file-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.inline-success {
+  margin: 12px 0;
+  padding: 10px 12px;
+  color: #1b5b40;
+  background: #e4f4e9;
+  border: 1px solid #bdddc8;
+  border-radius: 9px;
+  font-size: 0.82rem;
+}
+
+.auth-shell {
+  min-height: 100vh;
+  color: #edf5ef;
+  background:
+    radial-gradient(circle at 14% 20%, rgba(211, 169, 82, 0.17), transparent 30rem),
+    radial-gradient(circle at 82% 80%, rgba(53, 132, 104, 0.16), transparent 34rem),
+    linear-gradient(145deg, #081c17, #11352b 58%, #091f19);
+}
+
+.auth-topbar {
+  display: flex;
+  width: min(1080px, calc(100% - 40px));
+  min-height: 84px;
+  margin: 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.auth-layout {
+  display: grid;
+  width: min(1080px, calc(100% - 40px));
+  min-height: calc(100vh - 84px);
+  margin: 0 auto;
+  padding: 60px 0;
+  align-items: center;
+  grid-template-columns: 1.15fr minmax(360px, 0.85fr);
+  gap: 70px;
+}
+
+.auth-hero h1 {
+  max-width: 650px;
+  margin-bottom: 20px;
+  color: white;
+  font-size: clamp(3.2rem, 7vw, 6.2rem);
+  line-height: 0.94;
+  letter-spacing: -0.055em;
+}
+
+.auth-hero p {
+  max-width: 590px;
+  color: rgba(237, 245, 239, 0.67);
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.auth-card {
+  padding: 28px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 22px;
+  box-shadow: 0 25px 80px rgba(0, 10, 7, 0.38);
+}
+
+.auth-tabs {
+  display: grid;
+  margin-bottom: 26px;
+  padding: 4px;
+  grid-template-columns: repeat(3, 1fr);
+  background: var(--paper-deep);
+  border-radius: 12px;
+}
+
+.auth-tabs button {
+  min-height: 39px;
+  padding: 4px 8px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.auth-tabs button.selected {
+  color: var(--forest);
+  background: white;
+  box-shadow: 0 4px 14px rgba(22, 43, 34, 0.1);
+}
+
+.auth-card .field input,
+.profile-modal .field input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0 13px;
+  color: var(--ink);
+  background: white;
+  border: 1px solid #cbcfc8;
+  border-radius: 10px;
+}
+
+.auth-card .field small {
+  color: var(--muted);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.auth-code-button {
+  margin: -7px 0 17px;
+}
+
+.visibility-field {
+  display: grid;
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+  gap: 8px;
+}
+
+.visibility-field legend {
+  margin-bottom: 8px;
+  color: #505b54;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.visibility-option {
+  display: flex;
+  padding: 11px 12px;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  cursor: pointer;
+}
+
+.visibility-option.selected {
+  background: rgba(18, 61, 50, 0.055);
+  border-color: var(--forest-light);
+}
+
+.visibility-option input {
+  margin-top: 3px;
+  accent-color: var(--forest);
+}
+
+.visibility-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.visibility-option small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.visibility-badge {
+  display: inline-flex;
+  margin: -8px 0 18px;
+  padding: 6px 10px;
+  color: var(--forest-light);
+  background: rgba(18, 61, 50, 0.07);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.waiting-account {
+  position: fixed;
+  z-index: 2;
+  top: 18px;
+  right: 20px;
+  color: white;
+}
+
+.seat-avatar {
+  width: 34px;
+  height: 34px;
+}
+
+.player-heading {
+  position: relative;
+}
+
+.player-heading .player-avatar {
+  flex: 0 0 auto;
+}
+
+.game-header .account-menu {
+  color: var(--forest);
+}
+
+.game-header .account-identity,
+.game-header .language-switcher {
+  background: rgba(18, 61, 50, 0.05);
+  border-color: rgba(18, 61, 50, 0.13);
+}
+
+@media (max-width: 900px) {
+  .auth-layout {
+    grid-template-columns: 1fr;
+    gap: 30px;
+  }
+
+  .auth-hero h1 {
+    font-size: clamp(3rem, 13vw, 5rem);
+  }
+
+  .header-account-row .account-menu > .button-quiet,
+  .game-header .account-menu > .button-quiet {
+    display: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .auth-topbar,
+  .auth-layout {
+    width: calc(100% - 24px);
+  }
+
+  .auth-layout {
+    padding: 28px 0;
+  }
+
+  .auth-card {
+    padding: 20px;
+  }
+
+  .account-menu {
+    gap: 5px;
+  }
+
+  .account-identity span,
+  .header-account-row .language-switcher,
+  .game-header .language-switcher {
+    display: none;
+  }
+
+  .profile-avatar-row {
+    grid-template-columns: 78px 1fr;
+  }
+
+  .profile-avatar-large {
+    width: 72px;
+    height: 72px;
+    border-radius: 20px;
+  }
+
+  .waiting-account {
+    top: 10px;
+    right: 10px;
+  }
+}

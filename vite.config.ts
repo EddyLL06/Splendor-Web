@@ -6,6 +6,18 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+      },
+      '/games': {
+        target: 'http://localhost:8000',
+      },
+      '/socket.io': {
+        target: 'http://localhost:8000',
+        ws: true,
+      },
+    },
   },
   preview: {
     port: 4173,
@@ -13,6 +25,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    exclude: ['e2e/**', 'node_modules/**'],
     coverage: {
       reporter: ['text', 'json-summary'],
     },
