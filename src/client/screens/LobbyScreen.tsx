@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LobbyAPI } from 'boardgame.io';
 import type { LobbyClient } from 'boardgame.io/client';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +7,8 @@ import { localizedError, useAuth } from '../auth.js';
 import { AccountMenu } from '../components/AccountMenu.js';
 import { GAME_NAME } from '../config.js';
 import { matchShareURL, type MatchSession } from '../session.js';
+
+const LOBBY_REVALIDATION_INTERVAL_MS = 15_000;
 
 interface LobbyScreenProps {
   lobby: LobbyClient;
@@ -27,8 +29,10 @@ export function LobbyScreen({ lobby, inviteMatchID, onSession }: LobbyScreenProp
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const lastRefreshAt = useRef(0);
 
   const refresh = useCallback(async () => {
+    lastRefreshAt.current = Date.now();
     try {
       const response = await lobby.listMatches(GAME_NAME, { isGameover: false });
       setMatches(response.matches);
@@ -47,9 +51,23 @@ export function LobbyScreen({ lobby, inviteMatchID, onSession }: LobbyScreenProp
   }, [inviteMatchID, lobby]);
 
   useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 5000);
-    return () => window.clearInterval(timer);
+    const refreshIfStale = () => {
+      if (
+        lastRefreshAt.current > 0 &&
+        (document.visibilityState === 'hidden' ||
+          Date.now() - lastRefreshAt.current < LOBBY_REVALIDATION_INTERVAL_MS)
+      ) {
+        return;
+      }
+      void refresh();
+    };
+    refreshIfStale();
+    window.addEventListener('focus', refreshIfStale);
+    document.addEventListener('visibilitychange', refreshIfStale);
+    return () => {
+      window.removeEventListener('focus', refreshIfStale);
+      document.removeEventListener('visibilitychange', refreshIfStale);
+    };
   }, [refresh]);
 
   const joinMatch = async (match: LobbyAPI.Match) => {

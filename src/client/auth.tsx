@@ -4,11 +4,14 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 
 import i18n from './i18n.js';
+
+const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60_000;
 
 export interface AuthUser {
   id: string;
@@ -86,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionExpiresAt: null,
   });
   const [loading, setLoading] = useState(true);
+  const lastRefreshAt = useRef(0);
 
   const adoptSession = useCallback((next: SessionResponse) => {
     setSession(next);
@@ -93,19 +97,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async () => {
+    lastRefreshAt.current = Date.now();
     const next = await rawRequest<SessionResponse>('/api/auth/me');
     adoptSession(next);
   }, [adoptSession]);
 
   useEffect(() => {
     window.localStorage.removeItem('gem-council-display-name');
-    void refresh().catch(() => setLoading(false));
-    const onFocus = () => void refresh().catch(() => undefined);
-    window.addEventListener('focus', onFocus);
-    const timer = window.setInterval(onFocus, 60_000);
+    const refreshIfStale = () => {
+      if (
+        lastRefreshAt.current > 0 &&
+        (document.visibilityState === 'hidden' ||
+          Date.now() - lastRefreshAt.current < SESSION_REVALIDATION_INTERVAL_MS)
+      ) {
+        return;
+      }
+      void refresh().catch(() => setLoading(false));
+    };
+    refreshIfStale();
+    window.addEventListener('focus', refreshIfStale);
+    document.addEventListener('visibilitychange', refreshIfStale);
     return () => {
-      window.removeEventListener('focus', onFocus);
-      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshIfStale);
+      document.removeEventListener('visibilitychange', refreshIfStale);
     };
   }, [refresh]);
 
