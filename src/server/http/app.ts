@@ -176,6 +176,7 @@ export const createGemCouncilApplication = async (
   });
   const lobby = new LobbyService({ db: matchStore, credentials: seatCredentials });
   const app = boardgame.app;
+  app.proxy = true;
 
   app.use(async (ctx, next) => {
     try {

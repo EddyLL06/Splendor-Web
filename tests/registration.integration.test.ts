@@ -44,6 +44,51 @@ describe('registration and verification challenges', () => {
     expect(user?.passwordHash).not.toContain('Printable!123');
   });
 
+  it('sets a secure session cookie behind the trusted production proxy', async () => {
+    const origin = 'https://game.example.test';
+    const proxiedEnvironment = await createTestApplication('production-proxy', {
+      NODE_ENV: 'production',
+      APP_BASE_URL: origin,
+      GAME_ALLOWED_ORIGINS: origin,
+      EMAIL_PROVIDER: 'resend',
+      RESEND_API_KEY: 're_test_only',
+      SESSION_SECRET: 's'.repeat(43),
+      VERIFICATION_CODE_PEPPER: 'v'.repeat(43),
+      GAME_CREDENTIAL_SECRET: 'g'.repeat(43),
+    });
+    try {
+      const email = 'production-proxy@example.test';
+      await proxiedEnvironment.request
+        .post('/api/auth/register/request-code')
+        .set('Origin', origin)
+        .set('X-Forwarded-Proto', 'https')
+        .send({ email, locale: 'en' })
+        .expect(200);
+      const code = proxiedEnvironment.email.latestCode(email, 'registration');
+      expect(code).toMatch(/^\d{6}$/);
+
+      const response = await proxiedEnvironment.request
+        .post('/api/auth/register/complete')
+        .set('Origin', origin)
+        .set('X-Forwarded-Proto', 'https')
+        .send({
+          email,
+          code,
+          username: 'ProductionProxy',
+          password: 'Printable!123',
+        })
+        .expect(200);
+      const setCookie = response.headers['set-cookie'];
+      const cookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie) ?? '';
+      expect(cookie).toContain('gem_council_session=');
+      expect(cookie).toContain('httponly');
+      expect(cookie).toContain('secure');
+      expect(cookie).toContain('samesite=lax');
+    } finally {
+      await proxiedEnvironment.cleanup();
+    }
+  });
+
   it('rejects invalid email without creating a challenge', async () => {
     await supertest(environment.app.app.callback())
       .post('/api/auth/register/request-code')

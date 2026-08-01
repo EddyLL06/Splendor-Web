@@ -64,9 +64,12 @@ export const migrateFreshDatabase = async (config: AppConfig): Promise<void> => 
   );
 };
 
-export const createTestApplication = async (suite: string): Promise<TestApplication> => {
+export const createTestApplication = async (
+  suite: string,
+  overrides: NodeJS.ProcessEnv = {},
+): Promise<TestApplication> => {
   const root = await mkdtemp(join(tmpdir(), `gem-council-${suite}-`));
-  const config = createTestConfig(root);
+  const config = createTestConfig(root, overrides);
   await migrateFreshDatabase(config);
   const email = new FakeEmailService();
   const app = await createGemCouncilApplication({ config, email });
