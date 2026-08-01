@@ -55,8 +55,9 @@ const addLog = (
   state: SplendorState,
   kind: SplendorState['actionLog'][number]['kind'],
   message: string,
+  i18n?: SplendorState['actionLog'][number]['i18n'],
 ): void => {
-  state.actionLog.push({ id: state.nextLogID, kind, message });
+  state.actionLog.push({ id: state.nextLogID, kind, message, ...(i18n ? { i18n } : {}) });
   state.nextLogID += 1;
   if (state.actionLog.length > 40) {
     state.actionLog.splice(0, state.actionLog.length - 40);
@@ -94,6 +95,9 @@ const finishGame = (state: SplendorState): void => {
     winners.length === 1
       ? `${playerLabel(winners[0])} won the game.`
       : `${winners.map(playerLabel).join(' and ')} shared the victory.`,
+    winners.length === 1
+      ? { key: 'win', values: { player: Number(winners[0]) + 1 } }
+      : { key: 'sharedWin', values: { players: winners.map((id) => Number(id) + 1).join(', ') } },
   );
 };
 
@@ -110,7 +114,8 @@ const completeTurn = (state: SplendorState, playerID: PlayerID): void => {
     addLog(
       state,
       'final-round',
-      `${playerLabel(playerID)} reached 15 prestige; the final round began.`,
+    `${playerLabel(playerID)} reached 15 prestige; the final round began.`,
+    { key: 'finalRound', values: { player: Number(playerID) + 1 } },
     );
   }
 
@@ -134,6 +139,7 @@ const awardNoble = (
     state,
     'noble',
     `${playerLabel(playerID)} received noble ${nobleID}.`,
+    { key: 'noble', values: { player: Number(playerID) + 1, noble: nobleID } },
   );
 };
 
@@ -232,6 +238,7 @@ const takeDifferent = (
     next,
     'tokens',
     `${playerLabel(playerID)} took one ${colors.join(', ')} token.`,
+    { key: 'different', values: { player: Number(playerID) + 1, colors } },
   );
   resolveAfterMainAction(next, playerID);
   return success(next);
@@ -262,6 +269,7 @@ const takeSame = (
     next,
     'tokens',
     `${playerLabel(playerID)} took two ${color} tokens.`,
+    { key: 'same', values: { player: Number(playerID) + 1, color } },
   );
   resolveAfterMainAction(next, playerID);
   return success(next);
@@ -310,6 +318,7 @@ const reserveMarket = (
     next,
     'reserve',
     `${playerLabel(playerID)} reserved public card ${cardID}.`,
+    { key: 'reservePublic', values: { player: Number(playerID) + 1, card: cardID } },
   );
   resolveAfterMainAction(next, playerID);
   return success(next);
@@ -354,6 +363,7 @@ const reserveDeck = (
     next,
     'reserve',
     `${playerLabel(playerID)} reserved a hidden tier ${tier} card.`,
+    { key: 'reserveHidden', values: { player: Number(playerID) + 1, tier } },
   );
   resolveAfterMainAction(next, playerID);
   return success(next);
@@ -399,6 +409,7 @@ const purchase = (
     next,
     'purchase',
     `${playerLabel(playerID)} purchased ${cardResult.value.id}.`,
+    { key: 'purchase', values: { player: Number(playerID) + 1, card: cardResult.value.id } },
   );
   resolveAfterMainAction(next, playerID);
   return success(next);
@@ -497,6 +508,7 @@ export const applyDiscard = (
     next,
     'discard',
     `${playerLabel(playerID)} returned ${formatTokenSelection(returned)}.`,
+    { key: 'discard', values: { player: Number(playerID) + 1, tokens: returned } },
   );
   next.pending = null;
   resolveNoblesOrComplete(next, playerID);

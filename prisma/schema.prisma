@@ -1,0 +1,71 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id                 String   @id
+  email              String
+  normalizedEmail    String   @unique
+  username           String
+  normalizedUsername String   @unique
+  passwordHash       String
+  emailVerifiedAt    DateTime
+  status             String   @default("active")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  avatar   AvatarAsset?
+  sessions Session[]
+}
+
+model EmailVerificationChallenge {
+  id                String    @id
+  normalizedEmail   String
+  purpose           String
+  codeHash          String
+  expiresAt         DateTime
+  resendAvailableAt DateTime
+  failedAttempts    Int       @default(0)
+  consumedAt        DateTime?
+  createdAt         DateTime  @default(now())
+
+  @@index([normalizedEmail, purpose, createdAt])
+}
+
+model Session {
+  id             String    @id
+  userId         String
+  tokenHash      String    @unique
+  csrfSecret     String
+  expiresAt      DateTime
+  lastActivityAt DateTime
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model AvatarAsset {
+  id         String   @id
+  userId     String   @unique
+  storageKey String   @unique
+  mimeType   String
+  byteSize   Int
+  width      Int
+  height     Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

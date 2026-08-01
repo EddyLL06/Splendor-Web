@@ -44,6 +44,10 @@ export interface ActionLogEntry {
     | 'final-round'
     | 'game-over';
   message: string;
+  i18n?: {
+    key: string;
+    values: Record<string, unknown>;
+  };
 }
 
 export type PendingResolution =

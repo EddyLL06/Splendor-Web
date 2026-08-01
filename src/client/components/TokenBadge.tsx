@@ -1,7 +1,6 @@
-import {
-  COLOR_LABELS,
-  COLOR_SHORT_LABELS,
-} from '../../shared/constants/colors.js';
+import { useTranslation } from 'react-i18next';
+
+import { COLOR_SHORT_LABELS } from '../../shared/constants/colors.js';
 import type { TokenColor } from '../../shared/types/game.js';
 
 interface TokenBadgeProps {
@@ -15,11 +14,13 @@ export function TokenBadge({
   count,
   compact = false,
 }: TokenBadgeProps) {
+  const { t } = useTranslation();
+  const label = t(`colors.${color}`);
   return (
     <span
       className={`token-badge token-${color}${compact ? ' token-compact' : ''}`}
-      aria-label={`${count} ${COLOR_LABELS[color]}`}
-      title={COLOR_LABELS[color]}
+      aria-label={`${count} ${label}`}
+      title={label}
     >
       <span className="token-symbol" aria-hidden="true">
         {COLOR_SHORT_LABELS[color]}

@@ -1,16 +1,16 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { LobbyAPI } from 'boardgame.io';
-import { LobbyClient } from 'boardgame.io/client';
 import { SocketIO } from 'boardgame.io/multiplayer';
 import { Client } from 'boardgame.io/react';
+import { useTranslation } from 'react-i18next';
 
 import { SplendorGame } from '../game/SplendorGame.js';
 import type { SplendorState } from '../shared/types/game.js';
-import {
-  GameBoard,
-  type GameBoardProps,
-} from './components/GameBoard.js';
+import { useAuth } from './auth.js';
+import { AccountMenu } from './components/AccountMenu.js';
+import { GameBoard, type GameBoardProps } from './components/GameBoard.js';
 import { GAME_NAME, GAME_SERVER_URL } from './config.js';
+import { AuthenticatedLobbyClient } from './lobby-client.js';
 import {
   getSharedMatchID,
   loadMatchSession,
@@ -19,6 +19,7 @@ import {
   setSharedMatchID,
   type MatchSession,
 } from './session.js';
+import { AuthScreen } from './screens/AuthScreen.js';
 import { LobbyScreen } from './screens/LobbyScreen.js';
 import { WaitingRoom } from './screens/WaitingRoom.js';
 
@@ -27,31 +28,74 @@ const MultiplayerGame = Client<SplendorState, GameBoardProps>({
   board: GameBoard,
   multiplayer: SocketIO({ server: GAME_SERVER_URL }),
   debug: false,
-  loading: () => (
-    <div className="loading-screen">
-      <div className="brand-mark large-mark">◆</div>
-      <strong>Connecting to the table…</strong>
-    </div>
-  ),
+  loading: () => <GameLoading />,
 });
 
+function GameLoading() {
+  const { t } = useTranslation();
+  return (
+    <div className="loading-screen">
+      <div className="brand-mark large-mark">◆</div>
+      <strong>{t('game.connecting')}</strong>
+    </div>
+  );
+}
+
 export default function App() {
+  const { t } = useTranslation();
+  const { user, csrfToken, loading, request } = useAuth();
   const lobby = useMemo(
-    () => new LobbyClient({ server: GAME_SERVER_URL }),
-    [],
+    () => new AuthenticatedLobbyClient(GAME_SERVER_URL, () => csrfToken),
+    [csrfToken],
   );
   const [inviteMatchID, setInviteMatchID] = useState(getSharedMatchID);
   const [session, setSession] = useState<MatchSession | null>(() =>
     loadMatchSession(getSharedMatchID()),
   );
   const [readyMatch, setReadyMatch] = useState<LobbyAPI.Match | null>(null);
+  const [restoring, setRestoring] = useState(false);
 
   const acceptSession = useCallback((next: MatchSession) => {
+    saveMatchSession(next);
     setSession(next);
     setReadyMatch(null);
     setInviteMatchID(next.matchID);
     setSharedMatchID(next.matchID);
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user) {
+      if (session) removeMatchSession(session.matchID);
+      setSession(null);
+      setReadyMatch(null);
+      return;
+    }
+    if (!session) return;
+    let active = true;
+    setRestoring(true);
+    void request<{ playerID: string; playerCredentials: string; playerName: string }>(
+      `/api/matches/${encodeURIComponent(session.matchID)}/reclaim`,
+      { method: 'POST' },
+    )
+      .then((restored) => {
+        if (!active) return;
+        acceptSession({ matchID: session.matchID, ...restored });
+      })
+      .catch(() => {
+        if (!active) return;
+        removeMatchSession(session.matchID);
+        setSession(null);
+        setReadyMatch(null);
+      })
+      .finally(() => {
+        if (active) setRestoring(false);
+      });
+    return () => { active = false; };
+    // Reclaim once when account identity or the match changes. Rotating on every
+    // session object update would invalidate the credential just issued.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, user?.id, session?.matchID]);
 
   const returnToLobby = useCallback(() => {
     if (session) removeMatchSession(session.matchID);
@@ -74,25 +118,28 @@ export default function App() {
   }, [lobby, returnToLobby, session]);
 
   const playAgain = useCallback(async () => {
-    if (!session) throw new Error('No current match session.');
+    if (!session || !user) throw new Error(t('game.rematchFailed'));
     const next = await lobby.playAgain(GAME_NAME, session.matchID, {
       playerID: session.playerID,
       credentials: session.playerCredentials,
     });
     const joined = await lobby.joinMatch(GAME_NAME, next.nextMatchID, {
       playerID: session.playerID,
-      playerName: session.playerName,
+      playerName: user.username,
     });
-    const nextSession: MatchSession = {
+    removeMatchSession(session.matchID);
+    acceptSession({
       matchID: next.nextMatchID,
       playerID: joined.playerID,
       playerCredentials: joined.playerCredentials,
-      playerName: session.playerName,
-    };
-    saveMatchSession(nextSession);
-    removeMatchSession(session.matchID);
-    acceptSession(nextSession);
-  }, [acceptSession, lobby, session]);
+      playerName: user.username,
+    });
+  }, [acceptSession, lobby, session, t, user]);
+
+  if (loading || restoring) {
+    return <GameLoading />;
+  }
+  if (!user) return <AuthScreen />;
 
   if (!session) {
     return (
@@ -118,7 +165,13 @@ export default function App() {
   const playerNames = Object.fromEntries(
     readyMatch.players.map((player) => [
       String(player.id),
-      player.name ?? `Player ${Number(player.id) + 1}`,
+      player.name ?? t('common.player', { number: Number(player.id) + 1 }),
+    ]),
+  );
+  const playerAvatars = Object.fromEntries(
+    readyMatch.players.map((player) => [
+      String(player.id),
+      (player.data as { avatarUrl?: string } | undefined)?.avatarUrl ?? '',
     ]),
   );
 
@@ -128,6 +181,8 @@ export default function App() {
       playerID={session.playerID}
       credentials={session.playerCredentials}
       playerNames={playerNames}
+      playerAvatars={playerAvatars}
+      accountMenu={<AccountMenu />}
       onLeaveMatch={() => void leaveMatch()}
       onReturnToLobby={returnToLobby}
       onPlayAgain={playAgain}

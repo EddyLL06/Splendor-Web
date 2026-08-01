@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 import { NORMAL_COLORS } from '../../shared/constants/colors.js';
 import { analyzePayment } from '../../shared/rules/selectors.js';
 import type {
@@ -29,25 +31,26 @@ export function DevelopmentCardView({
   onBuy,
   onReserve,
 }: DevelopmentCardViewProps) {
+  const { t } = useTranslation();
   const paymentErrors =
     playerID === null
-      ? [{ message: 'Join a player seat to buy cards.' }]
+      ? [{ message: t('game.joinToBuy') }]
       : analyzePayment(state, playerID, card).errors;
   const canBuy = interactive && paymentErrors.length === 0;
 
   return (
     <article className={`development-card bonus-${card.bonus}`}>
       <div className="card-topline">
-        <span className="card-tier">Tier {card.tier}</span>
-        <span className="card-points" aria-label={`${card.points} prestige`}>
+        <span className="card-tier">{t('game.tier', { tier: card.tier })}</span>
+        <span className="card-points" aria-label={t('game.standingPrestige', { count: card.points })}>
           {card.points} <span aria-hidden="true">◆</span>
         </span>
       </div>
       <div className="card-bonus">
         <TokenBadge color={card.bonus} count={1} />
-        <span>permanent bonus</span>
+        <span>{t('game.permanentBonus')}</span>
       </div>
-      <div className="card-cost" aria-label="Card cost">
+      <div className="card-cost" aria-label={t('game.cardCost')}>
         {NORMAL_COLORS.filter((color) => card.cost[color] > 0).map((color) => (
           <TokenBadge
             key={color}
@@ -57,7 +60,7 @@ export function DevelopmentCardView({
           />
         ))}
         {NORMAL_COLORS.every((color) => card.cost[color] === 0) && (
-          <span className="free-label">Free</span>
+          <span className="free-label">{t('game.free')}</span>
         )}
       </div>
       <div className="card-actions">
@@ -65,10 +68,10 @@ export function DevelopmentCardView({
           type="button"
           className="button button-primary button-small"
           disabled={!canBuy}
-          title={canBuy ? 'Buy this card' : paymentErrors[0]?.message}
+          title={canBuy ? t('game.buyCard') : t('errors.INVALID_INPUT')}
           onClick={() => onBuy(card, location)}
         >
-          Buy
+          {t('game.buy')}
         </button>
         {location.source === 'market' && onReserve && (
           <button
@@ -77,12 +80,12 @@ export function DevelopmentCardView({
             disabled={!interactive || !canReserve}
             title={
               canReserve
-                ? 'Reserve this visible card'
-                : 'You cannot reserve another card now.'
+                ? t('game.reserveVisible')
+                : t('game.cannotReserve')
             }
             onClick={() => onReserve(card)}
           >
-            Reserve
+            {t('game.reserve')}
           </button>
         )}
       </div>
