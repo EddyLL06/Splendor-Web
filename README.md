@@ -151,6 +151,10 @@ integrity in addition to application validation.
 
 ## Production storage and deployment
 
+For a complete start-to-finish deployment example, including Node.js 24,
+systemd, Nginx, HTTPS, backups, updates, and troubleshooting, see
+[SERVER_SETUP.md](./SERVER_SETUP.md).
+
 Put all persistent paths on an external mounted volume and use absolute paths,
 for example:
 
