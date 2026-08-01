@@ -1,27 +1,48 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
+import { createPortal } from 'react-dom';
 import type { BoardProps } from 'boardgame.io/react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
 import { NORMAL_COLORS, TOKEN_COLORS } from '../../shared/constants/colors.js';
 import { requireCard, requireNoble } from '../../shared/data/gameData.js';
-import { applyMainAction } from '../../shared/rules/engine.js';
+import { applyMainAction, suggestedDiscard } from '../../shared/rules/engine.js';
 import {
+  analyzePayment,
   getBonuses,
   getScore,
   totalTokens,
 } from '../../shared/rules/selectors.js';
 import type {
+  ActionAnimation,
   CardLocation,
   DevelopmentCard,
   MainAction,
+  ReservedDevelopmentCard,
   SplendorState,
   Tier,
   TokenColor,
   TokenCounts,
-  ActionLogEntry,
 } from '../../shared/types/game.js';
 import { localizedError } from '../auth.js';
+import {
+  canShowReservedCardDetails,
+  formatActionLog,
+  playTurnSound,
+  readTurnSoundPreference,
+  reduceCardActionMode,
+  reduceDiscardUi,
+  shouldNotifyLocalTurn,
+  type CardActionMode,
+} from '../gameUiState.js';
 import { matchShareURL } from '../session.js';
 import { DevelopmentCardView } from './DevelopmentCardView.js';
 import { PaymentPanel } from './PaymentPanel.js';
@@ -43,27 +64,181 @@ export interface GameBoardProps extends BoardProps<SplendorState> {
   onPlayAgain: () => Promise<void>;
 }
 
+interface PopoverPosition {
+  top: number;
+  left: number;
+}
+
+interface RectSnapshot {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+interface CardFlight {
+  id: string;
+  kind: 'outgoing' | 'replacement' | 'generic';
+  label: string;
+  from: RectSnapshot;
+  to: RectSnapshot;
+  delay: number;
+}
+
 const playerName = (
   names: Record<string, string>,
   playerID: string,
   t: TFunction,
 ): string => names[playerID] || t('common.player', { number: Number(playerID) + 1 });
 
-const formatActionLog = (entry: ActionLogEntry, t: TFunction): string => {
-  if (!entry.i18n) return entry.message;
-  const values = { ...entry.i18n.values } as Record<string, unknown>;
-  if (Array.isArray(values.colors)) {
-    values.colors = values.colors.map((color) => t(`colors.${String(color)}`)).join(', ');
+const collectAnimationRects = (): Map<string, RectSnapshot> => {
+  const rects = new Map<string, RectSnapshot>();
+  if (typeof document === 'undefined') return rects;
+  for (const element of document.querySelectorAll<HTMLElement>('[data-animation-key]')) {
+    const key = element.dataset.animationKey;
+    if (!key) continue;
+    const rect = element.getBoundingClientRect();
+    rects.set(key, {
+      top: rect.top,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height,
+    });
   }
-  if (typeof values.color === 'string') values.color = t(`colors.${values.color}`);
-  if (values.tokens && typeof values.tokens === 'object') {
-    values.tokens = Object.entries(values.tokens as Record<string, number>)
-      .filter(([, count]) => count > 0)
-      .map(([color, count]) => `${count} ${t(`colors.${color}`)}`)
-      .join(', ');
-  }
-  return t(`logs.${entry.i18n.key}`, values);
+  return rects;
 };
+
+const flightStyle = (flight: CardFlight): CSSProperties =>
+  ({
+    top: flight.from.top,
+    left: flight.from.left,
+    width: flight.from.width,
+    height: flight.from.height,
+    '--flight-x': `${flight.to.left - flight.from.left}px`,
+    '--flight-y': `${flight.to.top - flight.from.top}px`,
+    '--flight-width': `${Math.max(50, flight.to.width * 0.38)}px`,
+    '--flight-height': `${Math.max(70, flight.to.height * 0.62)}px`,
+    '--flight-delay': `${flight.delay}ms`,
+  }) as CSSProperties;
+
+function ReservedCardSummary({
+  reserved,
+  ownerID,
+  index,
+}: {
+  reserved: ReservedDevelopmentCard;
+  ownerID: string;
+  index: number;
+}) {
+  const { t } = useTranslation();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<PopoverPosition>({ top: 12, left: 12 });
+  const visible = canShowReservedCardDetails(reserved.cardId);
+  const card = visible && reserved.cardId ? requireCard(reserved.cardId) : null;
+
+  useEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = Math.min(260, window.innerWidth - 24);
+      const popoverHeight = 150;
+      const above = rect.top - popoverHeight - 10;
+      setPosition({
+        top: above >= 8 ? above : Math.min(window.innerHeight - popoverHeight - 8, rect.bottom + 8),
+        left: Math.max(8, Math.min(window.innerWidth - width - 8, rect.left + rect.width / 2 - width / 2)),
+      });
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !popoverRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [open]);
+
+  if (!card) {
+    return (
+      <span className="reserved-summary reserved-summary-hidden">
+        {t('game.hiddenTier', { tier: reserved.tier })}
+      </span>
+    );
+  }
+
+  const popover = open && typeof document !== 'undefined'
+    ? createPortal(
+        <div
+          ref={popoverRef}
+          className="reserved-popover"
+          role="tooltip"
+          style={position}
+        >
+          <div className="reserved-popover-heading">
+            <strong>{card.id}</strong>
+            <span>{t('game.standingPrestige', { count: card.points })}</span>
+          </div>
+          <div className="reserved-popover-cost">
+            {NORMAL_COLORS.map((color) => (
+              <TokenBadge key={color} color={color} count={card.cost[color]} compact />
+            ))}
+          </div>
+          <span className="reserved-popover-note">
+            {t('game.reservedDetail', { tier: card.tier, bonus: t(`colors.${card.bonus}`) })}
+          </span>
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="reserved-summary"
+        aria-describedby={open ? `reserved-popover-${ownerID}-${index}` : undefined}
+        aria-expanded={open}
+        data-animation-key={`reserved-${ownerID}-${card.id}`}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => {
+          window.requestAnimationFrame(() => {
+            if (!popoverRef.current?.contains(document.activeElement)) setOpen(false);
+          });
+        }}
+        onClick={() => setOpen((current) => !current)}
+      >
+        {card.id}
+      </button>
+      {popover && (
+        <span id={`reserved-popover-${ownerID}-${index}`} className="sr-only">
+          {t('game.reservedAccessibleDetail', { id: card.id, points: card.points })}
+        </span>
+      )}
+      {popover}
+    </>
+  );
+}
 
 function PlayerSummary({
   state,
@@ -88,6 +263,7 @@ function PlayerSummary({
       className={`player-summary${isCurrent ? ' player-current' : ''}${
         isLocal ? ' player-local' : ''
       }`}
+      data-animation-key={`player-${id}`}
     >
       <div className="player-heading">
         {avatarUrl && <img className="player-avatar" src={avatarUrl} alt="" />}
@@ -105,39 +281,33 @@ function PlayerSummary({
       </div>
       <div className="player-stats">
         <span>{t('game.cards', { count: player.purchasedCardIds.length })}</span>
-        <span>{t('game.reserved', { count: player.reservedCards.length })}</span>
-        <span>{t('game.tokens', { count: totalTokens(player.tokens) })}</span>
         <span>{t('game.nobles', { count: player.nobleIds.length })}</span>
+        <span>{t('game.reserved', { count: player.reservedCards.length })}</span>
       </div>
-      <div className="mini-token-row" aria-label={`${name} tokens`}>
+      <div className="mini-token-row" aria-label={t('game.playerTokens', { player: name, count: totalTokens(player.tokens) })}>
         {TOKEN_COLORS.map((color) => (
-          <TokenBadge
-            key={color}
-            color={color}
-            count={player.tokens[color]}
-            compact
-          />
+          <TokenBadge key={color} color={color} count={player.tokens[color]} compact />
         ))}
       </div>
-      <div className="bonus-row" aria-label={`${name} permanent bonuses`}>
+      <div className="bonus-row" aria-label={t('game.playerBonuses', { player: name })}>
         {NORMAL_COLORS.map((color) => (
-          <TokenBadge
-            key={color}
-            color={color}
-            count={bonuses[color]}
-            compact
-          />
+          <TokenBadge key={color} color={color} count={bonuses[color]} compact />
         ))}
       </div>
-      {player.reservedCards.length > 0 && (
-        <div className="public-reservations">
-          {player.reservedCards.map((reserved, index) => (
-            <span key={`${reserved.tier}-${reserved.cardId ?? index}`}>
-              {reserved.cardId ?? t('game.hiddenTier', { tier: reserved.tier })}
-            </span>
-          ))}
-        </div>
-      )}
+      <div className="public-reservations" aria-label={t('game.reservedSummary')}>
+        {player.reservedCards.length > 0 ? (
+          player.reservedCards.map((reserved, index) => (
+            <ReservedCardSummary
+              key={`${reserved.tier}-${reserved.cardId ?? `hidden-${index}`}`}
+              reserved={reserved}
+              ownerID={id}
+              index={index}
+            />
+          ))
+        ) : (
+          <span className="reserved-summary-empty">{t('game.noReserved')}</span>
+        )}
+      </div>
     </article>
   );
 }
@@ -151,15 +321,8 @@ function NobleTile({ nobleID }: { nobleID: string }) {
         <strong>{noble.points} ◆</strong>
       </div>
       <div className="noble-requirements">
-        {NORMAL_COLORS.filter(
-          (color) => noble.requirement[color] > 0,
-        ).map((color) => (
-          <TokenBadge
-            key={color}
-            color={color}
-            count={noble.requirement[color]}
-            compact
-          />
+        {NORMAL_COLORS.filter((color) => noble.requirement[color] > 0).map((color) => (
+          <TokenBadge key={color} color={color} count={noble.requirement[color]} compact />
         ))}
       </div>
     </article>
@@ -171,19 +334,21 @@ function TokenTakePanel({
   playerID,
   currentPlayerID,
   enabled,
+  blockedGuidance,
+  resetKey,
   onAction,
 }: {
   state: SplendorState;
   playerID: string | null;
   currentPlayerID: string;
   enabled: boolean;
+  blockedGuidance?: string;
+  resetKey: string;
   onAction: (action: MainAction) => void;
 }) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<TokenColor[]>([]);
-  useEffect(() => {
-    setSelected([]);
-  }, [currentPlayerID, state.completedTurns]);
+  useEffect(() => setSelected([]), [currentPlayerID, state.completedTurns, resetKey]);
 
   const choose = (color: (typeof NORMAL_COLORS)[number]) => {
     if (!enabled || state.bank[color] < 1) return;
@@ -191,14 +356,10 @@ function TokenTakePanel({
       const count = current.filter((entry) => entry === color).length;
       if (count === 2) return [];
       if (count === 1) {
-        if (current.length === 1 && state.bank[color] >= 4) {
-          return [color, color];
-        }
+        if (current.length === 1 && state.bank[color] >= 4) return [color, color];
         return current.filter((entry) => entry !== color);
       }
-      if (current.length < 3 && new Set(current).size === current.length) {
-        return [...current, color];
-      }
+      if (current.length < 3 && new Set(current).size === current.length) return [...current, color];
       return current;
     });
   };
@@ -213,38 +374,29 @@ function TokenTakePanel({
     return null;
   }, [selected]);
 
-  const validation =
-    action && playerID
-      ? applyMainAction(state, playerID, currentPlayerID, action)
-      : null;
+  const validation = action && playerID
+    ? applyMainAction(state, playerID, currentPlayerID, action)
+    : null;
   const guidance = !enabled
-    ? playerID === currentPlayerID
-      ? t('game.finishResolution')
-      : t('game.waitingTurn', { number: Number(currentPlayerID) + 1 })
+    ? blockedGuidance ?? (playerID === currentPlayerID
+        ? t('game.finishResolution')
+        : t('game.waitingTurn', { player: t('common.player', { number: Number(currentPlayerID) + 1 }) }))
     : action
       ? validation?.ok
-        ? selected.length === 2
-          ? t('game.takeTwoReady')
-          : t('game.takeThreeReady')
+        ? selected.length === 2 ? t('game.takeTwoReady') : t('game.takeThreeReady')
         : t('errors.INVALID_INPUT')
       : t('game.chooseTokens');
 
   return (
-    <section className="action-card">
+    <section className="action-card token-take-panel">
       <div className="section-heading compact-heading">
         <div>
           <span className="eyebrow">{t('game.mainAction')}</span>
           <h2>{t('game.takeTokens')}</h2>
         </div>
-        {selected.length > 0 && (
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => setSelected([])}
-          >
-            {t('game.clear')}
-          </button>
-        )}
+        <div className="gold-joker-info" aria-label={t('game.goldJokerRemaining', { count: state.bank.gold })}>
+          <TokenBadge color="gold" count={state.bank.gold} compact />
+        </div>
       </div>
       <div className="take-token-grid">
         {NORMAL_COLORS.map((color) => {
@@ -253,12 +405,11 @@ function TokenTakePanel({
             <button
               type="button"
               key={color}
-              className={`bank-token token-${color}${
-                count > 0 ? ' token-selected' : ''
-              }`}
+              className={`bank-token token-${color}${count > 0 ? ' token-selected' : ''}`}
               onClick={() => choose(color)}
               disabled={!enabled || state.bank[color] === 0}
               aria-pressed={count > 0}
+              aria-label={t('game.gemBankCount', { color: t(`colors.${color}`), count: state.bank[color] })}
             >
               <span className="bank-token-name">{t(`colors.${color}`)}</span>
               <strong>{state.bank[color]}</strong>
@@ -271,10 +422,8 @@ function TokenTakePanel({
       <button
         type="button"
         className="button button-primary button-full"
-        disabled={!action || !validation?.ok}
-        onClick={() => {
-          if (action) onAction(action);
-        }}
+        disabled={!enabled || !action || !validation?.ok}
+        onClick={() => action && onAction(action)}
       >
         {t('game.confirmTokens')}
       </button>
@@ -286,7 +435,9 @@ function MarketTier({
   tier,
   state,
   playerID,
+  mode,
   interactive,
+  replacingSlot,
   onBuy,
   onReserve,
   onBlindReserve,
@@ -294,63 +445,83 @@ function MarketTier({
   tier: Tier;
   state: SplendorState;
   playerID: string | null;
+  mode: CardActionMode;
   interactive: boolean;
+  replacingSlot: string | null;
   onBuy: (card: DevelopmentCard, location: CardLocation) => void;
   onReserve: (tier: Tier, cardID: string) => void;
   onBlindReserve: (tier: Tier) => void;
 }) {
   const { t } = useTranslation();
-  const reserveCount =
-    playerID === null ? 3 : state.players[playerID].reservedCards.length;
+  const reserveCount = playerID === null ? 3 : state.players[playerID].reservedCards.length;
   const canReserve = interactive && reserveCount < 3;
+  const deckSelectable = mode === 'reserve' && canReserve && state.decks[tier].length > 0;
+  const deckContent = (
+    <>
+      <span>{state.decks[tier].length}</span>
+      <small>{t('game.remaining')}</small>
+      {mode === 'reserve' && (
+        <em>{deckSelectable ? t('game.selectBlindDeck') : t('game.deckUnavailable')}</em>
+      )}
+    </>
+  );
+
   return (
     <section className="market-tier">
       <div className="tier-deck">
         <span className="eyebrow">{t('game.development')}</span>
         <h2>{t('game.tier', { tier })}</h2>
-        <div className={`deck-stack deck-tier-${tier}`}>
-          <span>{state.decks[tier].length}</span>
-          <small>{t('game.remaining')}</small>
-        </div>
-        <button
-          type="button"
-          className="button button-ghost button-small button-full"
-          disabled={!canReserve || state.decks[tier].length === 0}
-          title={
-            reserveCount >= 3
-              ? t('game.threeReserved')
-              : state.decks[tier].length === 0
-                ? t('game.deckEmpty')
-                : t('game.reserveHidden')
-          }
-          onClick={() => onBlindReserve(tier)}
-        >
-          {t('game.reserveBlind')}
-        </button>
+        {mode === 'reserve' ? (
+          <button
+            type="button"
+            className={`deck-stack deck-tier-${tier}${deckSelectable ? ' deck-selectable' : ''}`}
+            disabled={!deckSelectable}
+            onClick={() => onBlindReserve(tier)}
+            data-animation-key={`deck-${tier}`}
+            aria-label={t('game.reserveBlindTier', { tier })}
+          >
+            {deckContent}
+          </button>
+        ) : (
+          <div className={`deck-stack deck-tier-${tier}`} data-animation-key={`deck-${tier}`}>
+            {deckContent}
+          </div>
+        )}
       </div>
       <div className="market-cards">
-        {state.market[tier].map((cardID) => {
+        {state.market[tier].map((cardID, slotIndex) => {
+          const slotKey = `${tier}-${slotIndex}`;
+          if (cardID === null) {
+            return (
+              <div
+                className="empty-market-slot"
+                key={`market-slot-${slotIndex}`}
+                data-animation-key={`market-${tier}-${slotIndex}`}
+              >
+                <strong>{t('game.emptySlot')}</strong>
+                <span>{t('game.noReplacement')}</span>
+              </div>
+            );
+          }
           const card = requireCard(cardID);
+          const canBuy = mode === 'buy' && interactive && playerID !== null &&
+            analyzePayment(state, playerID, card).errors.length === 0;
+          const selectable = canBuy || (mode === 'reserve' && canReserve);
           return (
             <DevelopmentCardView
-              key={cardID}
+              key={`market-slot-${slotIndex}`}
               card={card}
-              state={state}
-              playerID={playerID}
-              location={{ source: 'market', tier, cardId: cardID }}
-              interactive={interactive}
-              canReserve={canReserve}
-              onBuy={onBuy}
-              onReserve={() => onReserve(tier, cardID)}
+              mode={mode}
+              selectable={selectable}
+              replacing={replacingSlot === slotKey}
+              animationKey={`market-${tier}-${slotIndex}`}
+              onSelect={() => {
+                if (mode === 'buy') onBuy(card, { source: 'market', tier, cardId: cardID });
+                if (mode === 'reserve') onReserve(tier, cardID);
+              }}
             />
           );
         })}
-        {state.market[tier].length === 0 && (
-          <div className="empty-market">
-            <strong>{t('game.tierExhausted')}</strong>
-            <span>{t('game.noCards')}</span>
-          </div>
-        )}
       </div>
     </section>
   );
@@ -371,18 +542,10 @@ function GameOverPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (!state.result) return null;
-  const winners = state.result.winners
-    .map((id) => playerName(names, id, t))
-    .join(' & ');
-
+  const winners = state.result.winners.map((id) => playerName(names, id, t)).join(' & ');
   return (
     <div className="modal-backdrop">
-      <section
-        className="modal game-over-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="game-over-title"
-      >
+      <section className="modal game-over-modal" role="dialog" aria-modal="true" aria-labelledby="game-over-title">
         <span className="eyebrow">{t('game.finalStandings')}</span>
         <h2 id="game-over-title">
           {state.result.winners.length > 1 ? t('game.sharedVictory') : t('game.victory')}
@@ -400,9 +563,7 @@ function GameOverPanel({
         </div>
         {error && <div className="inline-error">{error}</div>}
         <div className="modal-actions">
-          <button type="button" className="button button-ghost" onClick={onReturn}>
-            {t('game.returnLobby')}
-          </button>
+          <button type="button" className="button button-ghost" onClick={onReturn}>{t('game.returnLobby')}</button>
           <button
             type="button"
             className="button button-primary"
@@ -426,6 +587,12 @@ function GameOverPanel({
   );
 }
 
+const animationOriginKey = (animation: ActionAnimation): string => {
+  if (animation.type === 'market-card') return `market-${animation.tier}-${animation.slotIndex}`;
+  if (animation.type === 'reserve-deck') return `deck-${animation.tier}`;
+  return `reserved-${animation.playerID}-${animation.cardId}`;
+};
+
 export function GameBoard(props: GameBoardProps) {
   const { t } = useTranslation();
   const {
@@ -443,32 +610,180 @@ export function GameBoard(props: GameBoardProps) {
     onPlayAgain,
   } = props;
   const moveAPI = moves as unknown as MoveAPI;
-  const [purchaseTarget, setPurchaseTarget] = useState<{
-    card: DevelopmentCard;
-    location: CardLocation;
-  } | null>(null);
-  const [copied, setCopied] = useState(false);
   const localID = playerID ?? null;
-  const isLocalTurn = localID !== null && ctx.currentPlayer === localID;
-  const canTakeMainAction =
-    isLocalTurn && G.pending === null && G.result === null;
   const localPlayer = localID === null ? null : G.players[localID];
+  const isLocalTurn = localID !== null && ctx.currentPlayer === localID;
+  const canTakeMainAction = isLocalTurn && isConnected !== false && G.pending === null && G.result === null;
+  const [purchaseTarget, setPurchaseTarget] = useState<{ card: DevelopmentCard; location: CardLocation } | null>(null);
+  const [actionMode, setActionMode] = useState<CardActionMode>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [turnNotice, setTurnNotice] = useState(0);
+  const [turnNoticeVisible, setTurnNoticeVisible] = useState(false);
+  const [discardUi, setDiscardUi] = useState(() => ({
+    hidden: false,
+    returned: null as TokenCounts | null,
+  }));
+  const [flights, setFlights] = useState<CardFlight[]>([]);
+  const [replacingSlot, setReplacingSlot] = useState<string | null>(null);
+  const previousTurnRef = useRef<{ currentPlayer: string | null; localPlayer: string | null }>({
+    currentPlayer: null,
+    localPlayer: null,
+  });
+  const discardKeyRef = useRef<string | null>(null);
+  const resumeDiscardRef = useRef<HTMLButtonElement>(null);
+  const previousRectsRef = useRef<Map<string, RectSnapshot>>(new Map());
+  const processedLogIDRef = useRef<number | null>(null);
+  const animationTimerRef = useRef<number | null>(null);
+  const submitTimerRef = useRef<number | null>(null);
+  const latestLogID = G.actionLog.at(-1)?.id ?? 0;
 
   useEffect(() => {
+    const previous = previousTurnRef.current;
+    if (shouldNotifyLocalTurn(previous, ctx.currentPlayer, localID, G.result !== null)) {
+      setTurnNotice((current) => current + 1);
+      setTurnNoticeVisible(true);
+      if (readTurnSoundPreference()) playTurnSound();
+      const timeout = window.setTimeout(() => setTurnNoticeVisible(false), 800);
+      previousTurnRef.current = { currentPlayer: ctx.currentPlayer, localPlayer: localID };
+      return () => window.clearTimeout(timeout);
+    }
+    previousTurnRef.current = { currentPlayer: ctx.currentPlayer, localPlayer: localID };
+  }, [ctx.currentPlayer, G.result, localID]);
+
+  useEffect(() => {
+    setActionMode(null);
     setPurchaseTarget(null);
-  }, [ctx.currentPlayer, G.completedTurns]);
+    setIsSubmitting(false);
+  }, [ctx.currentPlayer, G.completedTurns, G.pending?.type, G.result, isConnected]);
+
+  useEffect(() => {
+    const key = G.pending?.type === 'discard' && localID === G.pending.playerID
+      ? `${G.pending.playerID}:${G.pending.count}:${G.completedTurns}`
+      : null;
+    if (key && discardKeyRef.current !== key && localID) {
+      discardKeyRef.current = key;
+      setDiscardUi((current) => reduceDiscardUi(current, {
+        type: 'start',
+        returned: suggestedDiscard(G, localID),
+      }));
+    } else if (!key) {
+      discardKeyRef.current = null;
+      setDiscardUi((current) => reduceDiscardUi(current, { type: 'reset' }));
+    }
+  }, [G, G.completedTurns, G.pending, localID]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setActionMode(null);
+      setPurchaseTarget(null);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  useEffect(() => () => {
+    if (animationTimerRef.current !== null) window.clearTimeout(animationTimerRef.current);
+    if (submitTimerRef.current !== null) window.clearTimeout(submitTimerRef.current);
+  }, []);
+
+  useLayoutEffect(() => {
+    const currentRects = collectAnimationRects();
+    if (processedLogIDRef.current === null) {
+      processedLogIDRef.current = latestLogID;
+      previousRectsRef.current = currentRects;
+      return;
+    }
+    if (latestLogID <= processedLogIDRef.current) {
+      previousRectsRef.current = currentRects;
+      return;
+    }
+    const newEntries = G.actionLog.filter((entry) => entry.id > (processedLogIDRef.current ?? 0));
+    processedLogIDRef.current = latestLogID;
+    const entry = [...newEntries].reverse().find((candidate) => candidate.animation);
+    const animation = entry?.animation;
+    if (!animation || !entry) {
+      previousRectsRef.current = currentRects;
+      return;
+    }
+    const destination = currentRects.get(`player-${animation.playerID}`);
+    const origin = previousRectsRef.current.get(animationOriginKey(animation)) ?? destination;
+    const nextFlights: CardFlight[] = [];
+    if (origin && destination) {
+      nextFlights.push({
+        id: `${entry.id}-out`,
+        kind: animation.type === 'reserve-deck' ? 'generic' : 'outgoing',
+        label: animation.type === 'market-card'
+          ? animation.cardId
+          : animation.type === 'reserved-purchase'
+            ? animation.cardId
+            : t('game.hiddenCardFace'),
+        from: origin,
+        to: destination,
+        delay: 0,
+      });
+    }
+    if (animation.type === 'market-card' && animation.replacementCardId) {
+      const deck = currentRects.get(`deck-${animation.tier}`);
+      const slot = currentRects.get(`market-${animation.tier}-${animation.slotIndex}`);
+      if (deck && slot) {
+        nextFlights.push({
+          id: `${entry.id}-replacement`,
+          kind: 'replacement',
+          label: animation.replacementCardId,
+          from: deck,
+          to: slot,
+          delay: 350,
+        });
+        setReplacingSlot(`${animation.tier}-${animation.slotIndex}`);
+      }
+    }
+    setFlights(nextFlights);
+    if (animationTimerRef.current !== null) window.clearTimeout(animationTimerRef.current);
+    animationTimerRef.current = window.setTimeout(() => {
+      setFlights([]);
+      setReplacingSlot(null);
+    }, 700);
+    previousRectsRef.current = currentRects;
+  }, [G.actionLog, latestLogID, t]);
 
   const sendMainAction = (action: MainAction) => {
+    if (!canTakeMainAction || isSubmitting) return;
+    setIsSubmitting(true);
+    setActionMode(null);
     moveAPI.mainAction(action);
+    if (submitTimerRef.current !== null) window.clearTimeout(submitTimerRef.current);
+    submitTimerRef.current = window.setTimeout(() => setIsSubmitting(false), 900);
   };
 
+  const toggleMode = (mode: Exclude<CardActionMode, null>) => {
+    const reserveAllowed = mode !== 'reserve' || (localPlayer?.reservedCards.length ?? 3) < 3;
+    setActionMode((current) => reduceCardActionMode(current, { type: 'toggle', mode }, canTakeMainAction && !isSubmitting && reserveAllowed));
+    setPurchaseTarget(null);
+  };
+
+  const modeGuidance = actionMode === 'buy'
+    ? t('game.buyModeGuidance')
+    : actionMode === 'reserve'
+      ? t('game.reserveModeGuidance')
+      : t('game.actionModeGuidance');
+
   return (
-    <div className="game-shell">
+    <div className={`game-shell${isLocalTurn && !G.result ? ' local-turn-active' : ''}`}>
+      <div className="turn-edge-highlight" aria-hidden="true" />
+      {turnNoticeVisible && (
+        <div key={turnNotice} className="your-turn-popup" aria-hidden="true">
+          {t('game.yourTurn')}
+        </div>
+      )}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {turnNoticeVisible ? t('game.yourTurnAnnouncement') : ''}
+      </div>
+
       <header className="game-header">
         <div className="brand-lockup">
-          <div className="brand-mark" aria-hidden="true">
-            ◆
-          </div>
+          <div className="brand-mark" aria-hidden="true">◆</div>
           <div>
             <strong>{t('common.appName')}</strong>
             <span>{t('common.match', { id: matchID })}</span>
@@ -494,26 +809,140 @@ export function GameBoard(props: GameBoardProps) {
           >
             {copied ? t('game.linkCopied') : t('game.copyInvite')}
           </button>
-          <button
-            type="button"
-            className="button button-quiet button-small"
-            onClick={onLeaveMatch}
-          >
+          <button type="button" className="button button-quiet button-small" onClick={onLeaveMatch}>
             {t('game.leave')}
           </button>
           {accountMenu}
         </div>
       </header>
 
-      <main className="game-layout">
-        <aside className="players-column">
-          <div className="section-heading compact-heading">
+      <main className="game-workspace">
+        <section className="upper-play-area">
+          <div className="table-column">
+            <section className="nobles-panel">
+              <div className="section-heading compact-heading">
+                <div>
+                  <span className="eyebrow">{t('game.visits')}</span>
+                  <h2>{t('game.availableNobles')}</h2>
+                </div>
+                <span className="subtle-note">{t('game.oneNoble')}</span>
+              </div>
+              <div className="nobles-row">
+                {G.availableNobleIds.map((nobleID) => <NobleTile key={nobleID} nobleID={nobleID} />)}
+                {G.availableNobleIds.length === 0 && <p className="empty-copy">{t('game.noNobles')}</p>}
+              </div>
+            </section>
+            <div className="markets">
+              {([3, 2, 1] as const).map((tier) => (
+                <MarketTier
+                  key={tier}
+                  tier={tier}
+                  state={G}
+                  playerID={localID}
+                  mode={actionMode}
+                  interactive={canTakeMainAction && !isSubmitting}
+                  replacingSlot={replacingSlot}
+                  onBuy={(card, location) => setPurchaseTarget({ card, location })}
+                  onReserve={(selectedTier, cardID) => sendMainAction({ type: 'reserveMarket', tier: selectedTier, cardId: cardID })}
+                  onBlindReserve={(selectedTier) => sendMainAction({ type: 'reserveDeck', tier: selectedTier })}
+                />
+              ))}
+            </div>
+          </div>
+
+          <aside className="actions-column">
+            <TokenTakePanel
+              state={G}
+              playerID={localID}
+              currentPlayerID={ctx.currentPlayer}
+              enabled={canTakeMainAction && !isSubmitting && actionMode === null}
+              blockedGuidance={actionMode ? modeGuidance : undefined}
+              resetKey={actionMode ?? 'none'}
+              onAction={sendMainAction}
+            />
+            <section className="action-card reserved-section">
+              <div className="section-heading compact-heading">
+                <div>
+                  <span className="eyebrow">{t('game.privateHand')}</span>
+                  <h2>{t('game.yourReserved')}</h2>
+                </div>
+                <span className="count-badge">{localPlayer?.reservedCards.length ?? 0}/3</span>
+              </div>
+              {localPlayer && localPlayer.reservedCards.length > 0 ? (
+                <div className="reserved-list">
+                  {localPlayer.reservedCards.map((reserved, index) => {
+                    const card = reserved.cardId ? requireCard(reserved.cardId) : null;
+                    if (!card) return <div className="hidden-reserved" key={`hidden-${index}`}>{t('game.hiddenCard', { tier: reserved.tier })}</div>;
+                    const canBuy = actionMode === 'buy' && canTakeMainAction && !isSubmitting &&
+                      analyzePayment(G, localID!, card).errors.length === 0;
+                    return (
+                      <DevelopmentCardView
+                        key={card.id}
+                        card={card}
+                        mode={actionMode === 'buy' ? 'buy' : null}
+                        selectable={canBuy}
+                        animationKey={`reserved-${localID}-${card.id}`}
+                        onSelect={() => setPurchaseTarget({ card, location: { source: 'reserved', cardId: card.id } })}
+                      />
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="empty-copy">{t('game.reserveHelp')}</p>
+              )}
+            </section>
+            <section className="action-card log-section">
+              <div className="section-heading compact-heading">
+                <div>
+                  <span className="eyebrow">{t('game.publicHistory')}</span>
+                  <h2>{t('game.actionLog')}</h2>
+                </div>
+              </div>
+              <ol className="action-log">
+                {[...G.actionLog].reverse().map((entry) => (
+                  <li key={entry.id}>
+                    <span className={`log-dot log-${entry.kind}`} />
+                    {formatActionLog(entry, t, playerNames)}
+                  </li>
+                ))}
+                {G.actionLog.length === 0 && <li className="empty-copy">{t('game.firstMove')}</li>}
+              </ol>
+            </section>
+          </aside>
+        </section>
+
+        <section className="card-action-toolbar" aria-label={t('game.cardActions')}>
+          <div className="toolbar-buttons">
+            <button
+              type="button"
+              className={`button button-primary${actionMode === 'buy' ? ' mode-active' : ''}`}
+              disabled={!canTakeMainAction || isSubmitting}
+              aria-pressed={actionMode === 'buy'}
+              onClick={() => toggleMode('buy')}
+            >
+              {t('game.buy')}
+            </button>
+            <button
+              type="button"
+              className={`button button-ghost${actionMode === 'reserve' ? ' mode-active' : ''}`}
+              disabled={!canTakeMainAction || isSubmitting || (localPlayer?.reservedCards.length ?? 3) >= 3}
+              aria-pressed={actionMode === 'reserve'}
+              onClick={() => toggleMode('reserve')}
+            >
+              {t('game.reserve')}
+            </button>
+          </div>
+          <p>{modeGuidance}</p>
+        </section>
+
+        <section className="players-strip-section">
+          <div className="section-heading player-strip-heading">
             <div>
               <span className="eyebrow">{t('game.table')}</span>
               <h2>{t('game.players')}</h2>
             </div>
           </div>
-          <div className="player-list">
+          <div className="player-strip">
             {G.playerOrder.map((id) => (
               <PlayerSummary
                 key={id}
@@ -526,143 +955,19 @@ export function GameBoard(props: GameBoardProps) {
               />
             ))}
           </div>
-        </aside>
-
-        <div className="board-column">
-          <section className="bank-panel">
-            <div>
-              <span className="eyebrow">{t('game.supply')}</span>
-              <h2>{t('game.bank')}</h2>
-            </div>
-            <div className="bank-row">
-              {TOKEN_COLORS.map((color) => (
-                <TokenBadge key={color} color={color} count={G.bank[color]} />
-              ))}
-            </div>
-          </section>
-
-          <section className="nobles-panel">
-            <div className="section-heading compact-heading">
-              <div>
-                <span className="eyebrow">{t('game.visits')}</span>
-                <h2>{t('game.availableNobles')}</h2>
-              </div>
-              <span className="subtle-note">{t('game.oneNoble')}</span>
-            </div>
-            <div className="nobles-row">
-              {G.availableNobleIds.map((nobleID) => (
-                <NobleTile key={nobleID} nobleID={nobleID} />
-              ))}
-              {G.availableNobleIds.length === 0 && (
-                <p className="empty-copy">{t('game.noNobles')}</p>
-              )}
-            </div>
-          </section>
-
-          <div className="markets">
-            {([3, 2, 1] as const).map((tier) => (
-              <MarketTier
-                key={tier}
-                tier={tier}
-                state={G}
-                playerID={localID}
-                interactive={canTakeMainAction}
-                onBuy={(card, location) =>
-                  setPurchaseTarget({ card, location })
-                }
-                onReserve={(selectedTier, cardID) =>
-                  sendMainAction({
-                    type: 'reserveMarket',
-                    tier: selectedTier,
-                    cardId: cardID,
-                  })
-                }
-                onBlindReserve={(selectedTier) =>
-                  sendMainAction({
-                    type: 'reserveDeck',
-                    tier: selectedTier,
-                  })
-                }
-              />
-            ))}
-          </div>
-        </div>
-
-        <aside className="actions-column">
-          <TokenTakePanel
-            state={G}
-            playerID={localID}
-            currentPlayerID={ctx.currentPlayer}
-            enabled={canTakeMainAction}
-            onAction={sendMainAction}
-          />
-
-          <section className="action-card reserved-section">
-            <div className="section-heading compact-heading">
-              <div>
-                <span className="eyebrow">{t('game.privateHand')}</span>
-                <h2>{t('game.yourReserved')}</h2>
-              </div>
-              <span className="count-badge">
-                {localPlayer?.reservedCards.length ?? 0}/3
-              </span>
-            </div>
-            {localPlayer && localPlayer.reservedCards.length > 0 ? (
-              <div className="reserved-list">
-                {localPlayer.reservedCards.map((reserved, index) => {
-                  const card = reserved.cardId
-                    ? requireCard(reserved.cardId)
-                    : undefined;
-                  return card ? (
-                    <DevelopmentCardView
-                      key={card.id}
-                      card={card}
-                      state={G}
-                      playerID={localID}
-                      location={{ source: 'reserved', cardId: card.id }}
-                      interactive={canTakeMainAction}
-                      onBuy={(selectedCard, location) =>
-                        setPurchaseTarget({
-                          card: selectedCard,
-                          location,
-                        })
-                      }
-                    />
-                  ) : (
-                    <div className="hidden-reserved" key={index}>
-                      {t('game.hiddenCard', { tier: reserved.tier })}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="empty-copy">
-                {t('game.reserveHelp')}
-              </p>
-            )}
-          </section>
-
-          <section className="action-card log-section">
-            <div className="section-heading compact-heading">
-              <div>
-                <span className="eyebrow">{t('game.publicHistory')}</span>
-                <h2>{t('game.actionLog')}</h2>
-              </div>
-            </div>
-            <ol className="action-log">
-              {[...G.actionLog].reverse().map((entry) => (
-                <li key={entry.id}>
-                  <span className={`log-dot log-${entry.kind}`} />
-                  {formatActionLog(entry, t)}
-                </li>
-              ))}
-              {G.actionLog.length === 0 && (
-                <li className="empty-copy">{t('game.firstMove')}</li>
-              )}
-            </ol>
-          </section>
-        </aside>
+        </section>
       </main>
+
+      {flights.map((flight) => (
+        <div
+          key={flight.id}
+          className={`card-flight flight-${flight.kind}`}
+          style={flightStyle(flight)}
+          aria-hidden="true"
+        >
+          <span>{flight.label}</span>
+        </div>
+      ))}
 
       {purchaseTarget && localID && (
         <PaymentPanel
@@ -670,37 +975,51 @@ export function GameBoard(props: GameBoardProps) {
           playerID={localID}
           card={purchaseTarget.card}
           location={purchaseTarget.location}
-          onCancel={() => setPurchaseTarget(null)}
+          onCancel={() => {
+            setPurchaseTarget(null);
+            setActionMode(null);
+          }}
           onConfirm={(location, payment) => {
-            moveAPI.mainAction({ type: 'purchase', location, payment });
+            sendMainAction({ type: 'purchase', location, payment });
             setPurchaseTarget(null);
           }}
         />
       )}
 
-      {G.pending?.type === 'discard' &&
-        localID === G.pending.playerID && (
-          <DiscardPanel
-            state={G}
-            playerID={localID}
-            currentPlayerID={ctx.currentPlayer}
-            onConfirm={(tokens) => moveAPI.discardTokens(tokens)}
-          />
-        )}
-
-      {G.pending?.type === 'noble' && localID === G.pending.playerID && (
-        <NoblePanel
-          nobleIDs={G.pending.eligibleNobleIds}
-          onChoose={(nobleID) => moveAPI.chooseNoble(nobleID)}
+      {G.pending?.type === 'discard' && localID === G.pending.playerID && discardUi.returned && !discardUi.hidden && (
+        <DiscardPanel
+          state={G}
+          playerID={localID}
+          currentPlayerID={ctx.currentPlayer}
+          returned={discardUi.returned}
+          onReturnedChange={(returned) => setDiscardUi((current) => reduceDiscardUi(current, { type: 'change', returned }))}
+          onHide={() => {
+            setDiscardUi((current) => reduceDiscardUi(current, { type: 'hide' }));
+            window.requestAnimationFrame(() => resumeDiscardRef.current?.focus());
+          }}
+          onConfirm={(tokens) => {
+            setDiscardUi((current) => reduceDiscardUi(current, { type: 'show' }));
+            moveAPI.discardTokens(tokens);
+          }}
         />
       )}
 
-      <GameOverPanel
-        state={G}
-        names={playerNames}
-        onPlayAgain={onPlayAgain}
-        onReturn={onReturnToLobby}
-      />
+      {G.pending?.type === 'discard' && localID === G.pending.playerID && discardUi.hidden && (
+        <button
+          ref={resumeDiscardRef}
+          type="button"
+          className="resume-discard-button"
+          onClick={() => setDiscardUi((current) => reduceDiscardUi(current, { type: 'show' }))}
+        >
+          {t('game.continueReturning', { count: G.pending.count })}
+        </button>
+      )}
+
+      {G.pending?.type === 'noble' && localID === G.pending.playerID && (
+        <NoblePanel nobleIDs={G.pending.eligibleNobleIds} onChoose={(nobleID) => moveAPI.chooseNoble(nobleID)} />
+      )}
+
+      <GameOverPanel state={G} names={playerNames} onPlayAgain={onPlayAgain} onReturn={onReturnToLobby} />
     </div>
   );
 }

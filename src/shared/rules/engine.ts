@@ -6,6 +6,7 @@ import {
 } from '../constants/colors.js';
 import { getCard, requireNoble } from '../data/gameData.js';
 import type {
+  ActionAnimation,
   MainAction,
   PlayerID,
   RuleError,
@@ -56,19 +57,29 @@ const addLog = (
   kind: SplendorState['actionLog'][number]['kind'],
   message: string,
   i18n?: SplendorState['actionLog'][number]['i18n'],
+  animation?: ActionAnimation,
 ): void => {
-  state.actionLog.push({ id: state.nextLogID, kind, message, ...(i18n ? { i18n } : {}) });
+  state.actionLog.push({
+    id: state.nextLogID,
+    kind,
+    message,
+    ...(i18n ? { i18n } : {}),
+    ...(animation ? { animation } : {}),
+  });
   state.nextLogID += 1;
   if (state.actionLog.length > 40) {
     state.actionLog.splice(0, state.actionLog.length - 40);
   }
 };
 
-const refillMarket = (state: SplendorState, tier: Tier): void => {
-  const replacement = state.decks[tier].shift();
-  if (replacement) {
-    state.market[tier].push(replacement);
-  }
+const refillMarketSlot = (
+  state: SplendorState,
+  tier: Tier,
+  slotIndex: number,
+): string | null => {
+  const replacement = state.decks[tier].shift() ?? null;
+  state.market[tier][slotIndex] = replacement;
+  return replacement;
 };
 
 const allPlayersHaveEqualTurns = (state: SplendorState): boolean => {
@@ -96,8 +107,8 @@ const finishGame = (state: SplendorState): void => {
       ? `${playerLabel(winners[0])} won the game.`
       : `${winners.map(playerLabel).join(' and ')} shared the victory.`,
     winners.length === 1
-      ? { key: 'win', values: { player: Number(winners[0]) + 1 } }
-      : { key: 'sharedWin', values: { players: winners.map((id) => Number(id) + 1).join(', ') } },
+      ? { key: 'win', values: { playerID: winners[0] } }
+      : { key: 'sharedWin', values: { playerIDs: winners } },
   );
 };
 
@@ -115,7 +126,7 @@ const completeTurn = (state: SplendorState, playerID: PlayerID): void => {
       state,
       'final-round',
     `${playerLabel(playerID)} reached 15 prestige; the final round began.`,
-    { key: 'finalRound', values: { player: Number(playerID) + 1 } },
+    { key: 'finalRound', values: { playerID } },
     );
   }
 
@@ -139,7 +150,7 @@ const awardNoble = (
     state,
     'noble',
     `${playerLabel(playerID)} received noble ${nobleID}.`,
-    { key: 'noble', values: { player: Number(playerID) + 1, noble: nobleID } },
+    { key: 'noble', values: { playerID, noble: nobleID } },
   );
 };
 
@@ -238,7 +249,7 @@ const takeDifferent = (
     next,
     'tokens',
     `${playerLabel(playerID)} took one ${colors.join(', ')} token.`,
-    { key: 'different', values: { player: Number(playerID) + 1, colors } },
+    { key: 'different', values: { playerID, colors } },
   );
   resolveAfterMainAction(next, playerID);
   return success(next);
@@ -269,7 +280,7 @@ const takeSame = (
     next,
     'tokens',
     `${playerLabel(playerID)} took two ${color} tokens.`,
-    { key: 'same', values: { player: Number(playerID) + 1, color } },
+    { key: 'same', values: { playerID, color } },
   );
   resolveAfterMainAction(next, playerID);
   return success(next);
@@ -303,13 +314,17 @@ const reserveMarket = (
   }
 
   const next = cloneState(state);
-  next.market[tier] = next.market[tier].filter((id) => id !== cardID);
+  const slotIndex = next.market[tier].indexOf(cardID);
+  if (slotIndex < 0) {
+    return failure('RESERVE_MARKET_MISSING', 'That card is no longer in the market.');
+  }
+  next.market[tier][slotIndex] = null;
   next.players[playerID].reservedCards.push({
     cardId: cardID,
     tier,
     source: 'market',
   });
-  refillMarket(next, tier);
+  const replacementCardId = refillMarketSlot(next, tier, slotIndex);
   if (next.bank.gold > 0) {
     next.bank.gold -= 1;
     next.players[playerID].tokens.gold += 1;
@@ -318,7 +333,16 @@ const reserveMarket = (
     next,
     'reserve',
     `${playerLabel(playerID)} reserved public card ${cardID}.`,
-    { key: 'reservePublic', values: { player: Number(playerID) + 1, card: cardID } },
+    { key: 'reservePublic', values: { playerID, card: cardID } },
+    {
+      type: 'market-card',
+      action: 'reserve',
+      playerID,
+      tier,
+      slotIndex,
+      cardId: cardID,
+      replacementCardId,
+    },
   );
   resolveAfterMainAction(next, playerID);
   return success(next);
@@ -363,7 +387,8 @@ const reserveDeck = (
     next,
     'reserve',
     `${playerLabel(playerID)} reserved a hidden tier ${tier} card.`,
-    { key: 'reserveHidden', values: { player: Number(playerID) + 1, tier } },
+    { key: 'reserveHidden', values: { playerID, tier } },
+    { type: 'reserve-deck', playerID, tier },
   );
   resolveAfterMainAction(next, playerID);
   return success(next);
@@ -393,24 +418,51 @@ const purchase = (
   next.players[playerID].purchasedCardIds.push(cardResult.value.id);
 
   if (action.location.source === 'market') {
-    next.market[action.location.tier] = next.market[
-      action.location.tier
-    ].filter((cardID) => cardID !== action.location.cardId);
-    refillMarket(next, action.location.tier);
+    const slotIndex = next.market[action.location.tier].indexOf(
+      action.location.cardId,
+    );
+    if (slotIndex < 0) {
+      return failure('CARD_NOT_IN_MARKET', 'That card is no longer in the market.');
+    }
+    next.market[action.location.tier][slotIndex] = null;
+    const replacementCardId = refillMarketSlot(
+      next,
+      action.location.tier,
+      slotIndex,
+    );
+    addLog(
+      next,
+      'purchase',
+      `${playerLabel(playerID)} purchased ${cardResult.value.id}.`,
+      { key: 'purchase', values: { playerID, card: cardResult.value.id } },
+      {
+        type: 'market-card',
+        action: 'purchase',
+        playerID,
+        tier: action.location.tier,
+        slotIndex,
+        cardId: cardResult.value.id,
+        replacementCardId,
+      },
+    );
   } else {
     next.players[playerID].reservedCards = next.players[
       playerID
     ].reservedCards.filter(
       (reserved) => reserved.cardId !== action.location.cardId,
     );
+    addLog(
+      next,
+      'purchase',
+      `${playerLabel(playerID)} purchased ${cardResult.value.id}.`,
+      { key: 'purchase', values: { playerID, card: cardResult.value.id } },
+      {
+        type: 'reserved-purchase',
+        playerID,
+        cardId: cardResult.value.id,
+      },
+    );
   }
-
-  addLog(
-    next,
-    'purchase',
-    `${playerLabel(playerID)} purchased ${cardResult.value.id}.`,
-    { key: 'purchase', values: { player: Number(playerID) + 1, card: cardResult.value.id } },
-  );
   resolveAfterMainAction(next, playerID);
   return success(next);
 };
@@ -508,7 +560,7 @@ export const applyDiscard = (
     next,
     'discard',
     `${playerLabel(playerID)} returned ${formatTokenSelection(returned)}.`,
-    { key: 'discard', values: { player: Number(playerID) + 1, tokens: returned } },
+    { key: 'discard', values: { playerID, tokens: returned } },
   );
   next.pending = null;
   resolveNoblesOrComplete(next, playerID);

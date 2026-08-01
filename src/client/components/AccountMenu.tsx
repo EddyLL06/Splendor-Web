@@ -2,6 +2,10 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { localizedError, useAuth, type AuthUser } from '../auth.js';
+import {
+  readTurnSoundPreference,
+  writeTurnSoundPreference,
+} from '../gameUiState.js';
 import { LanguageSwitcher } from './LanguageSwitcher.js';
 
 function ProfileModal({ onClose }: { onClose: () => void }) {
@@ -131,11 +135,24 @@ export function AccountMenu() {
   const { user, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [turnSound, setTurnSound] = useState(readTurnSoundPreference);
   if (!user) return <LanguageSwitcher />;
   return (
     <>
       <div className="account-menu">
         <LanguageSwitcher />
+        <label className="turn-sound-toggle">
+          <input
+            type="checkbox"
+            checked={turnSound}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              setTurnSound(enabled);
+              writeTurnSoundPreference(enabled);
+            }}
+          />
+          <span>{t('account.turnSound')}</span>
+        </label>
         <button type="button" className="account-identity" onClick={() => setProfileOpen(true)}>
           <img src={user.avatarUrl} alt="" />
           <span>{user.username}</span>
