@@ -9,13 +9,13 @@
  */
 
 import type { PlayerID } from '../../shared/types/game.js';
+import {
+  BOT_DIFFICULTIES,
+  isBotDifficulty,
+  type BotDifficulty,
+} from '../../shared/ai/types.js';
 
-export const BOT_DIFFICULTIES = ['easy', 'normal', 'hard', 'expert'] as const;
-export type BotDifficulty = (typeof BOT_DIFFICULTIES)[number];
-
-export const isBotDifficulty = (value: unknown): value is BotDifficulty =>
-  typeof value === 'string' &&
-  (BOT_DIFFICULTIES as readonly string[]).includes(value);
+export { BOT_DIFFICULTIES, isBotDifficulty, type BotDifficulty };
 
 export interface HumanSeatIdentity {
   kind: 'human';

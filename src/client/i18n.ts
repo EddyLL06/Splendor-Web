@@ -331,6 +331,7 @@ export const translations = {
         reserveHidden: '{{player}} reserved a hidden tier {{tier}} card.',
         purchase: '{{player}} purchased {{card}}.',
         discard: '{{player}} returned {{tokens}}.',
+        pass: '{{player}} passed (no legal action).',
       },
     },
   },
@@ -360,7 +361,7 @@ export const translations = {
       spectators: { title: '旁观者', empty: '当前没有在线旁观者。' },
       colors: { white: '钻石', blue: '蓝宝石', green: '祖母绿', red: '红宝石', black: '缟玛瑙', gold: '黄金万能标记' },
       logs: {
-        fallback: '{{message}}', playerJoiner: '和', win: '{{player}}赢得了对局。', sharedWin: '{{players}}共同获胜。', finalRound: '{{player}}达到 15 威望，最终轮开始。', noble: '{{player}}获得贵族 {{noble}}。', different: '{{player}}各拿取了一枚{{colors}}标记。', same: '{{player}}拿取了两枚{{color}}标记。', reservePublic: '{{player}}预留了公开卡 {{card}}。', reserveHidden: '{{player}}预留了一张隐藏的 {{tier}} 级卡。', purchase: '{{player}}购买了 {{card}}。', discard: '{{player}}归还了 {{tokens}}。',
+        fallback: '{{message}}', playerJoiner: '和', win: '{{player}}赢得了对局。', sharedWin: '{{players}}共同获胜。', finalRound: '{{player}}达到 15 威望，最终轮开始。', noble: '{{player}}获得贵族 {{noble}}。', different: '{{player}}各拿取了一枚{{colors}}标记。', same: '{{player}}拿取了两枚{{color}}标记。', reservePublic: '{{player}}预留了公开卡 {{card}}。', reserveHidden: '{{player}}预留了一张隐藏的 {{tier}} 级卡。', purchase: '{{player}}购买了 {{card}}。', discard: '{{player}}归还了 {{tokens}}。', pass: '{{player}}因无合法行动而跳过回合。',
       },
     },
   },

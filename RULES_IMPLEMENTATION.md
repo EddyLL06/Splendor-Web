@@ -47,10 +47,15 @@ turn order.
 Exactly one of these actions is accepted while no mandatory resolution is
 pending.
 
-### Take three different gems
+### Take different gems
 
 `takeDifferent` requires exactly three distinct normal colors with at least one
 token available in each bank pile. Gold and duplicate colors are rejected.
+
+When the bank contains exactly two normal colors (each with at least one
+token), the fallback rule applies: the player takes one token of each of those
+two colors instead of three. There is no fallback when fewer than two colors
+remain.
 
 ### Take two matching gems
 

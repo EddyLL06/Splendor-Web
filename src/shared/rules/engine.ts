@@ -89,6 +89,69 @@ const allPlayersHaveEqualTurns = (state: SplendorState): boolean => {
   return counts.every((count) => count === counts[0]);
 };
 
+/**
+ * True when `playerID` has at least one legal main action besides `pass`.
+ * This is the single authoritative definition used both by the rules layer
+ * (pass is only permitted as a stall rescue) and by the AI enumerator.
+ */
+export const hasLegalMainAction = (
+  state: SplendorState,
+  playerID: PlayerID,
+): boolean => {
+  const player = state.players[playerID];
+  if (!player || state.pending !== null || state.result !== null) return false;
+
+  let availableColors = 0;
+  for (const color of NORMAL_COLORS) {
+    if (state.bank[color] >= 4) return true;
+    if (state.bank[color] > 0) availableColors += 1;
+  }
+  // Exactly two colors: the takeDifferent fallback takes one of each.
+  if (availableColors >= 2) return true;
+
+  if (player.reservedCards.length < 3) {
+    for (const tier of [1, 2, 3] as const) {
+      if (
+        state.market[tier].some((cardID) => cardID !== null) ||
+        state.decks[tier].length > 0
+      ) {
+        return true;
+      }
+    }
+  }
+
+  for (const tier of [1, 2, 3] as const) {
+    for (const cardID of state.market[tier]) {
+      if (cardID === null) continue;
+      const cardResult = findPurchasableCard(state, playerID, {
+        source: 'market',
+        tier,
+        cardId: cardID,
+      });
+      if (
+        cardResult.ok &&
+        analyzePayment(state, playerID, cardResult.value).errors.length === 0
+      ) {
+        return true;
+      }
+    }
+  }
+  for (const reserved of player.reservedCards) {
+    if (reserved.cardId === null) continue;
+    const cardResult = findPurchasableCard(state, playerID, {
+      source: 'reserved',
+      cardId: reserved.cardId,
+    });
+    if (
+      cardResult.ok &&
+      analyzePayment(state, playerID, cardResult.value).errors.length === 0
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const finishGame = (state: SplendorState): void => {
   const standings = createStandings(state);
   const leader = standings[0];
@@ -212,23 +275,27 @@ const takeDifferent = (
   playerID: PlayerID,
   colors: TokenColor[],
 ): RuleResult<SplendorState> => {
+  const availableColors = NORMAL_COLORS.filter(
+    (color) => state.bank[color] >= 1,
+  );
+  const expectedCount = availableColors.length === 2 ? 2 : 3;
   if (
     !Array.isArray(colors) ||
-    colors.length !== 3 ||
+    colors.length !== expectedCount ||
     !colors.every(isTokenColorValue)
   ) {
     return failure(
       'TAKE_DIFFERENT_COUNT',
-      'Choose exactly three normal gem colors.',
+      `Choose exactly ${expectedCount} normal gem colors.`,
     );
   }
   if (colors.some((color) => !isGemColor(color))) {
     return failure('TAKE_GOLD', 'Gold cannot be taken as a normal gem.');
   }
-  if (new Set(colors).size !== 3) {
+  if (new Set(colors).size !== colors.length) {
     return failure(
       'TAKE_DIFFERENT_DUPLICATE',
-      'The three selected gem colors must be different.',
+      'The selected gem colors must be different.',
     );
   }
   for (const color of colors) {
@@ -248,7 +315,9 @@ const takeDifferent = (
   addLog(
     next,
     'tokens',
-    `${playerLabel(playerID)} took one ${colors.join(', ')} token.`,
+    `${playerLabel(playerID)} took one ${colors.join(', ')} token${
+      colors.length > 1 ? 's' : ''
+    }.`,
     { key: 'different', values: { playerID, colors } },
   );
   resolveAfterMainAction(next, playerID);
@@ -498,6 +567,24 @@ export const applyMainAction = (
       return reserveDeck(state, playerID, action.tier);
     case 'purchase':
       return purchase(state, playerID, action);
+    case 'pass':
+      if (hasLegalMainAction(state, playerID)) {
+        return failure(
+          'PASS_NOT_NEEDED',
+          'A legal action exists; passing is only allowed as a stall rescue.',
+        );
+      }
+      {
+        const next = cloneState(state);
+        addLog(
+          next,
+          'pass',
+          `${playerLabel(playerID)} passed (no legal action).`,
+          { key: 'pass', values: { playerID } },
+        );
+        resolveAfterMainAction(next, playerID);
+        return success(next);
+      }
     default:
       return failure('ACTION_INVALID', 'Action type is invalid.');
   }

@@ -14,5 +14,5 @@
     "noEmit": false,
     "types": ["node"]
   },
-  "include": ["src/game", "src/server", "src/shared"]
+  "include": ["src/game", "src/server", "src/shared", "scripts/ai"]
 }

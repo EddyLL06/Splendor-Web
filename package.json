@@ -18,6 +18,8 @@
     "prisma:migrate:deploy": "npm run storage:prepare && prisma migrate deploy",
     "typecheck": "npm run prisma:generate && tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
     "test": "npm run prisma:generate && vitest run tests",
+    "test:ai": "npm run prisma:generate && vitest run tests/ai",
+    "ai:self-play": "tsx scripts/ai/self-play.ts",
     "test:e2e": "npm run prisma:generate && playwright test",
     "test:e2e:serve": "tsx scripts/e2e-server.ts",
     "test:watch": "vitest tests",

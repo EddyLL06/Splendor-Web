@@ -69,6 +69,7 @@ export interface ActionLogEntry {
     | 'purchase'
     | 'discard'
     | 'noble'
+    | 'pass'
     | 'final-round'
     | 'game-over';
   message: string;
@@ -158,6 +159,14 @@ export type MainAction =
       type: 'purchase';
       location: CardLocation;
       payment: TokenCounts;
+    }
+  | {
+      /**
+       * Stall rescue only: legal exactly when the player has no other legal
+       * main action (see engine.hasLegalMainAction). Passing grants no
+       * resources and simply ends the turn.
+       */
+      type: 'pass';
     };
 
 export interface RuleError {
