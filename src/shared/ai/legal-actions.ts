@@ -5,7 +5,11 @@
  */
 
 import { NORMAL_COLORS, TOKEN_COLORS } from '../constants/colors.js';
-import { analyzePayment, findPurchasableCard } from '../rules/selectors.js';
+import {
+  analyzePayment,
+  findPurchasableCard,
+  getEligibleNobleIDs,
+} from '../rules/selectors.js';
 import { applyMainAction, hasLegalMainAction } from '../rules/engine.js';
 import type {
   CardLocation,
@@ -112,10 +116,13 @@ export const enumerateNobleCandidates = (
   if (state.pending?.type !== 'noble' || state.pending.playerID !== playerID) {
     return [];
   }
-  return state.pending.eligibleNobleIds.map((nobleID) => ({
-    actionKey: `noble:${nobleID}`,
-    move: { move: 'chooseNoble', args: [nobleID] },
-  }));
+  const eligible = new Set(getEligibleNobleIDs(state, playerID));
+  return state.pending.eligibleNobleIds
+    .filter((nobleID) => eligible.has(nobleID))
+    .map((nobleID) => ({
+      actionKey: `noble:${nobleID}`,
+      move: { move: 'chooseNoble', args: [nobleID] },
+    }));
 };
 
 export const enumerateMainActions = (

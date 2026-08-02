@@ -175,16 +175,13 @@ describe('legal action enumeration', () => {
 
   it('generates only still-eligible noble candidates', () => {
     const state = createTestState();
+    // Without matching bonuses no noble is eligible.
     state.pending = {
       type: 'noble',
       playerID: '0',
       eligibleNobleIds: ['noble-1', 'noble-2'],
     };
-    const candidates = enumerateNobleCandidates(state, '0');
-    expect(candidates.map((candidate) => candidate.move.args[0])).toEqual([
-      'noble-1',
-      'noble-2',
-    ]);
+    expect(enumerateNobleCandidates(state, '0')).toEqual([]);
   });
 
   it('dispatches by phase and returns nothing for foreign pending', () => {

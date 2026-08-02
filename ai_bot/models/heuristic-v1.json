@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "modelVersion": "heuristic-v1.0.0",
+  "createdAt": "2026-08-03T00:00:00.000Z",
+  "rulesFingerprint": "1ba7ffbd95104d3bdda3bf9942087a720b23d965ac3a059977312e9396e9e192",
+  "featureVersion": "features-v1",
+  "weights": {
+    "score": 12,
+    "leaderGap": 6,
+    "distanceTo15": -3,
+    "bonusWhite": 2.2,
+    "bonusBlue": 2.2,
+    "bonusGreen": 2.2,
+    "bonusRed": 2.2,
+    "bonusBlack": 2.2,
+    "bonusBalance": 6,
+    "purchasedCount": 1,
+    "nobleProgress": 14,
+    "nobleCount": 20,
+    "tokensTotal": 1.6,
+    "gold": 2.5,
+    "affordableCount": 4,
+    "waste": -10,
+    "reservedSlots": -2,
+    "opponentMaxScore": -4,
+    "opponentNobleThreat": -5,
+    "blockingValue": 3,
+    "tempo": 3,
+    "tiebreakCards": -1.5,
+    "marketValue1": 1.2,
+    "marketValue2": 1.6,
+    "marketValue3": 2.2
+  },
+  "training": {
+    "algorithm": "hand-tuned-v1",
+    "seedSet": "none",
+    "games": 0
+  },
+  "validation": {
+    "holdoutSeedSet": "holdout-v1",
+    "games": 0,
+    "baselineModelVersion": "uniform-random-v1"
+  }
+}

@@ -17,6 +17,11 @@ import type {
 import { effectiveCostForCard } from '../rules/selectors.js';
 import type { AIActionCandidate } from './legal-actions.js';
 import {
+  FEATURE_NAMES,
+  extractFeatures,
+  type FeatureVector,
+} from './features.js';
+import {
   applySimulationDiscard,
   applySimulationMainAction,
   applySimulationNoble,
@@ -207,4 +212,24 @@ export const scoreCandidate = (
     return scoreDiscard(state, playerID, ctx, argument as TokenCounts);
   }
   return scoreNoble(state, playerID, ctx, argument as string);
+};
+
+/**
+ * Linear model evaluation: Σ normalized feature × weight, with terminal
+ * overrides. Shared wins count as wins for each winner.
+ */
+export const evaluateWithWeights = (
+  state: SplendorState,
+  playerID: PlayerID,
+  weights: Partial<FeatureVector>,
+): number => {
+  if (state.result) {
+    return state.result.winners.includes(playerID) ? 1_000_000 : -1_000_000;
+  }
+  const features = extractFeatures(state, playerID);
+  let value = 0;
+  for (const name of FEATURE_NAMES) {
+    value += features[name] * (weights[name] ?? 0);
+  }
+  return value;
 };

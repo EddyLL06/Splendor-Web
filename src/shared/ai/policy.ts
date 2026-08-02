@@ -10,6 +10,7 @@ import {
   type AIActionCandidate,
 } from './legal-actions.js';
 import { scoreCandidate } from './evaluate.js';
+import { evaluateWithWeights } from './evaluate.js';
 import { determinize } from './hidden-information.js';
 import {
   assertObservationIntegrity,
@@ -113,7 +114,11 @@ const validateMove = (
 export const chooseBotMove = (
   observation: AIObservation,
   ctx: BoardContextView,
-  options: { policy: AgentPolicyID; seed: string },
+  options: {
+    policy: AgentPolicyID;
+    seed: string;
+    weights?: Record<string, number>;
+  },
 ): BotDecision => {
   const startedAt = performance.now();
   assertObservationIntegrity(observation);
@@ -132,13 +137,22 @@ export const chooseBotMove = (
   const selected =
     options.policy === 'uniform-random-v1'
       ? chooseUniformRandom(candidates, options.seed)
-      : chooseCheapGreedy(
-          fullState,
-          candidates,
-          observation.playerID,
-          ctx,
-          options.seed,
-        );
+      : options.policy === 'cheap-greedy-v1'
+        ? chooseCheapGreedy(
+            fullState,
+            candidates,
+            observation.playerID,
+            ctx,
+            options.seed,
+          )
+        : chooseNormal(
+            fullState,
+            candidates,
+            observation.playerID,
+            ctx,
+            options.seed,
+            options.weights,
+          );
 
   const decision: BotDecision = {
     move: selected.move,
@@ -152,6 +166,42 @@ export const chooseBotMove = (
   };
   validateMove(fullState, observation.playerID, ctx, decision);
   return decision;
+};
+
+const chooseNormal = (
+  state: SplendorState,
+  candidates: AIActionCandidate[],
+  playerID: string,
+  ctx: BoardContextView,
+  seed: string,
+  weights: Record<string, number> | undefined,
+): AIActionCandidate => {
+  const rng = createSeededRNG(`policy:${seed}`);
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let best: AIActionCandidate[] = [];
+  for (const candidate of candidates) {
+    const [argument] = candidate.move.args;
+    const sim = createSimulation(
+      JSON.parse(JSON.stringify(state)) as SplendorState,
+      ctx,
+    );
+    const result =
+      candidate.move.move === 'mainAction'
+        ? applySimulationMainAction(sim, playerID, argument as MainAction)
+        : candidate.move.move === 'discardTokens'
+          ? applySimulationDiscard(sim, playerID, argument as TokenCounts)
+          : applySimulationNoble(sim, playerID, argument as string);
+    const score = result.ok
+      ? evaluateWithWeights(sim.G, playerID, weights ?? {})
+      : Number.NEGATIVE_INFINITY;
+    if (score > bestScore) {
+      bestScore = score;
+      best = [candidate];
+    } else if (score === bestScore) {
+      best.push(candidate);
+    }
+  }
+  return rng.choice(best);
 };
 
 /**
