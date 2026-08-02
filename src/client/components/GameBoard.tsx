@@ -120,10 +120,10 @@ const flightStyle = (flight: CardFlight): CSSProperties =>
     '--flight-y': `${flight.to.top - flight.from.top}px`,
     '--flight-width': `${flight.kind === 'replacement'
       ? flight.to.width
-      : Math.max(52, Math.min(flight.from.width * 0.46, flight.to.width * 0.42))}px`,
+      : Math.max(96, Math.min(flight.from.width * 0.72, flight.to.width * 0.36))}px`,
     '--flight-height': `${flight.kind === 'replacement'
       ? flight.to.height
-      : Math.max(68, Math.min(flight.from.height * 0.54, flight.to.height * 0.72))}px`,
+      : Math.max(76, Math.min(flight.from.height * 0.72, flight.to.height * 0.68))}px`,
     '--flight-delay': `${flight.delay}ms`,
   }) as CSSProperties;
 
@@ -745,7 +745,7 @@ export function GameBoard(props: GameBoardProps) {
           card: requireCard(animation.replacementCardId),
           from: deck,
           to: slot,
-          delay: 360,
+          delay: 720,
         });
         setReplacingSlot(`${animation.tier}-${animation.slotIndex}`);
       }
@@ -755,7 +755,7 @@ export function GameBoard(props: GameBoardProps) {
     animationTimerRef.current = window.setTimeout(() => {
       setFlights([]);
       setReplacingSlot(null);
-    }, 900);
+    }, 1700);
     previousRectsRef.current = currentRects;
   }, [G.actionLog, t]);
 

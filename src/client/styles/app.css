@@ -2424,7 +2424,7 @@ h2 {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-columns: minmax(245px, 275px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 240px) minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -2445,8 +2445,9 @@ h2 {
 }
 
 .table-column {
-  align-content: start;
+  align-content: stretch;
   padding-right: 2px;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
 }
 
@@ -2483,15 +2484,16 @@ h2 {
 
 .nobles-row {
   min-width: 0;
-  padding-bottom: 2px;
+  padding-bottom: 0;
   overflow-x: auto;
   flex-wrap: nowrap;
   gap: 6px;
 }
 
 .noble-tile {
-  min-width: 112px;
-  padding: 6px 7px;
+  min-width: 116px;
+  padding: 7px 9px;
+  border-radius: 11px;
 }
 
 .noble-title {
@@ -2507,19 +2509,33 @@ h2 {
 }
 
 .markets {
-  gap: 9px;
-}
-
-.market-tier {
-  min-height: 128px;
-  padding: 7px;
-  grid-template-columns: 88px minmax(0, 1fr);
+  min-height: 0;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
   gap: 7px;
 }
 
+.market-tier {
+  height: 100%;
+  min-height: 0;
+  padding: 6px;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 6px;
+}
+
 .tier-deck {
+  display: grid;
   min-width: 0;
   padding: 3px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: stretch;
+}
+
+.tier-deck .eyebrow {
+  overflow: visible;
+  font-size: 0.46rem;
+  line-height: 1.1;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
 }
 
 .tier-deck h2 {
@@ -2528,8 +2544,9 @@ h2 {
 }
 
 .deck-stack {
+  height: 100%;
+  min-height: 0;
   width: 100%;
-  min-height: 82px;
   margin: 0;
   padding: 6px;
   font: inherit;
@@ -2562,6 +2579,8 @@ button.deck-stack {
 }
 
 .market-cards {
+  height: 100%;
+  min-height: 0;
   grid-template-columns: repeat(4, minmax(116px, 1fr));
   gap: 6px;
 }
@@ -2623,7 +2642,7 @@ button.development-card {
 }
 
 .card-bonus {
-  margin: 6px 0 5px;
+  margin: 4px 0;
   gap: 5px;
 }
 
@@ -2642,7 +2661,18 @@ button.development-card {
 }
 
 .card-cost {
-  min-height: 22px;
+  min-height: 20px;
+}
+
+.development-card-market .card-cost,
+.development-card-flight .card-cost {
+  flex-wrap: nowrap;
+}
+
+.market-cards .development-card,
+.market-cards .empty-market-slot {
+  height: 100%;
+  min-height: 0;
 }
 
 .card-mode-label {
@@ -2726,6 +2756,11 @@ button.development-card {
   gap: 7px;
 }
 
+.reserved-column .section-heading h2 {
+  font-size: 1.05rem;
+  white-space: nowrap;
+}
+
 .reserved-empty-state {
   display: grid;
   min-height: 92px;
@@ -2754,6 +2789,8 @@ button.development-card {
 .right-column .action-log {
   min-height: 0;
   overflow-y: auto;
+  align-content: start;
+  grid-auto-rows: max-content;
 }
 
 .card-action-toolbar {
@@ -2801,7 +2838,7 @@ button.development-card {
   display: grid;
   min-width: 0;
   min-height: 0;
-  padding: 7px 10px 9px;
+  padding: 5px 10px 7px;
   overflow: visible;
   background: rgba(251, 250, 246, 0.78);
   border: 1px solid rgba(204, 198, 184, 0.86);
@@ -2810,7 +2847,7 @@ button.development-card {
 }
 
 .player-strip-heading {
-  min-height: 22px;
+  min-height: 16px;
   margin-bottom: 0;
 }
 
@@ -2827,11 +2864,10 @@ button.development-card {
   display: grid;
   min-width: 0;
   min-height: 0;
-  padding: 9px 3px 3px;
+  padding: 4px 3px 2px;
   overflow: visible;
   scrollbar-width: thin;
-  grid-auto-columns: minmax(0, 1fr);
-  grid-auto-flow: column;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -2840,7 +2876,7 @@ button.development-card {
   min-width: 0;
   max-width: none;
   min-height: 0;
-  padding: 7px 8px;
+  padding: 6px 7px;
   align-content: start;
   overflow: hidden;
   background: var(--paper);
@@ -2850,8 +2886,8 @@ button.development-card {
     transform 180ms ease,
     box-shadow 180ms ease,
     border-color 180ms ease;
-  grid-template-rows: auto auto auto auto minmax(22px, auto);
-  gap: 3px;
+  grid-template-rows: auto auto auto auto minmax(18px, auto);
+  gap: 2px;
 }
 
 .player-strip .player-summary.player-local {
@@ -2866,7 +2902,7 @@ button.development-card {
     0 0 0 3px rgba(197, 154, 69, 0.2),
     0 10px 24px rgba(79, 60, 16, 0.2),
     inset 0 0 18px rgba(216, 177, 83, 0.09);
-  transform: translateY(-6px);
+  transform: translateY(-3px);
 }
 
 .player-strip .player-summary.player-local.player-current {
@@ -3056,7 +3092,7 @@ button.development-card {
 
 .card-flight-layer {
   position: fixed;
-  z-index: 180;
+  z-index: 360;
   inset: 0;
   overflow: visible;
   pointer-events: none;
@@ -3069,13 +3105,17 @@ button.development-card {
   place-items: center;
   pointer-events: none;
   transform-origin: top left;
+  will-change: transform, width, height, opacity;
 }
 
 .card-flight .development-card {
   width: 100%;
   height: 100%;
   min-height: 0;
-  box-shadow: 0 16px 35px rgba(4, 20, 15, 0.32);
+  outline: 3px solid rgba(223, 180, 72, 0.92);
+  box-shadow:
+    0 0 0 7px rgba(223, 180, 72, 0.2),
+    0 22px 48px rgba(4, 20, 15, 0.42);
 }
 
 .card-back-label {
@@ -3087,14 +3127,16 @@ button.development-card {
   background: repeating-linear-gradient(45deg, #244b3e 0 8px, #1c3d33 8px 16px);
   border: 2px solid rgba(255, 255, 255, 0.72);
   border-radius: 10px;
-  box-shadow: 0 16px 35px rgba(4, 20, 15, 0.32);
+  box-shadow:
+    0 0 0 7px rgba(223, 180, 72, 0.2),
+    0 22px 48px rgba(4, 20, 15, 0.42);
   font-size: 0.64rem;
   font-weight: 900;
 }
 
 .flight-outgoing,
 .flight-generic {
-  animation: card-flight-out 420ms var(--flight-delay) cubic-bezier(0.3, 0.7, 0.3, 1) both;
+  animation: card-flight-out 900ms var(--flight-delay) cubic-bezier(0.22, 0.72, 0.26, 1) both;
 }
 
 .flight-generic {
@@ -3102,11 +3144,11 @@ button.development-card {
 }
 
 .flight-replacement {
-  animation: card-flight-replacement 320ms var(--flight-delay) ease-out both;
+  animation: card-flight-replacement 600ms var(--flight-delay) ease-out both;
 }
 
 .development-card.card-replacing {
-  animation: market-card-reveal 190ms 650ms ease-out both;
+  animation: market-card-reveal 260ms 1320ms ease-out both;
 }
 
 .turn-sound-toggle {
@@ -3160,22 +3202,28 @@ button.development-card {
 }
 
 @keyframes card-flight-out {
-  0% { opacity: 1; transform: translate(0, 0) scale(1); }
-  25% { transform: translate(calc(var(--flight-x) * 0.2), calc(var(--flight-y) * 0.2)) scale(0.88); }
+  0% { opacity: 0.94; transform: translate(0, 0) scale(0.98); }
+  14% { opacity: 1; transform: translate(0, -10px) scale(1.03); }
+  72% {
+    opacity: 1;
+    transform: translate(calc(var(--flight-x) * 0.78), calc(var(--flight-y) * 0.78 - 18px)) scale(0.82);
+  }
   100% {
     width: var(--flight-width);
     height: var(--flight-height);
-    opacity: 0;
-    transform: translate(var(--flight-x), var(--flight-y)) scale(0.42);
+    opacity: 0.14;
+    transform: translate(var(--flight-x), var(--flight-y)) scale(0.7);
   }
 }
 
 @keyframes card-flight-replacement {
-  0% { opacity: 0.78; transform: translate(0, 0) scale(0.65); }
+  0% { opacity: 0; transform: translate(0, 0) scale(0.72); }
+  18% { opacity: 1; transform: translate(0, -8px) scale(0.86); }
+  82% { opacity: 1; }
   100% {
     width: var(--flight-width);
     height: var(--flight-height);
-    opacity: 0;
+    opacity: 0.18;
     transform: translate(var(--flight-x), var(--flight-y)) scale(1);
   }
 }
@@ -3187,7 +3235,7 @@ button.development-card {
 
 @media (min-width: 1450px) {
   .upper-play-area {
-    grid-template-columns: minmax(260px, 280px) minmax(0, 1fr) minmax(320px, 350px);
+    grid-template-columns: minmax(220px, 240px) minmax(0, 1fr) minmax(320px, 350px);
   }
 
   .reserved-column,
@@ -3234,6 +3282,29 @@ button.development-card {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .table-column {
+    grid-template-rows: auto auto;
+  }
+
+  .markets {
+    grid-template-rows: repeat(3, auto);
+  }
+
+  .market-tier,
+  .market-cards .development-card,
+  .market-cards .empty-market-slot {
+    height: auto;
+  }
+
+  .market-tier {
+    min-height: 128px;
+  }
+
+  .market-cards .development-card,
+  .market-cards .empty-market-slot {
+    min-height: 112px;
+  }
+
   .action-log {
     max-height: 260px;
   }
@@ -3258,10 +3329,25 @@ button.development-card {
 
   .tier-deck {
     display: grid;
-    grid-template-columns: auto auto 1fr;
+    height: auto;
+    min-height: 0;
+    align-content: center;
+    justify-content: start;
+    grid-template-columns: auto auto minmax(96px, 110px);
+    grid-template-rows: auto;
+    gap: 8px;
+  }
+
+  .tier-deck .eyebrow {
+    display: block;
+  }
+
+  .tier-deck h2 {
+    margin: 0;
   }
 
   .deck-stack {
+    height: 66px;
     min-width: 96px;
     min-height: 66px;
   }
@@ -3280,9 +3366,9 @@ button.development-card {
   }
 
   .card-action-toolbar {
-    position: sticky;
-    z-index: 25;
-    bottom: 8px;
+    position: static;
+    z-index: auto;
+    bottom: auto;
     grid-template-columns: 1fr;
     gap: 6px;
   }
