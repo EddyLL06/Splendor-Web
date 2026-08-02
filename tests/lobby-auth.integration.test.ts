@@ -77,8 +77,11 @@ describe('authenticated lobby and account-bound seats', () => {
     const metadata = await alice.agent.get(`${gamePath}/${matchID}`).expect(200);
     expect(metadata.body.players[0]).toMatchObject({
       name: alice.username,
-      data: { userId: alice.userID, matchId: matchID, playerId: '0' },
+      data: { isHost: true, isViewer: true },
     });
+    expect(metadata.body.players[0].data).not.toHaveProperty('userId');
+    expect(metadata.body.players[0].data).not.toHaveProperty('matchId');
+    expect(metadata.body.players[0].data).not.toHaveProperty('playerId');
     expect(JSON.stringify(metadata.body)).not.toContain(originalCredential);
     expect(JSON.stringify(metadata.body)).not.toContain('gem_council_session');
     expect(JSON.stringify(metadata.body)).not.toContain('<b>Forged Alice</b>');
@@ -95,8 +98,48 @@ describe('authenticated lobby and account-bound seats', () => {
     await other.agent.post(`/api/matches/${matchID}/reclaim`).set(mutate(other)).expect(403, { error: { code: 'FORBIDDEN' } });
     const reclaimed = await alice.agent.post(`/api/matches/${matchID}/reclaim`).set(mutate(alice)).expect(200);
     expect(reclaimed.body.playerID).toBe('0');
-    expect(reclaimed.body.playerCredentials).not.toBe(originalCredential);
+    expect(reclaimed.body.playerCredentials).toBe(originalCredential);
     expect(reclaimed.body.playerName).toBe(alice.username);
+
+    const secondSessionAgent = supertest.agent(environment.app.app.callback());
+    const secondLogin = await secondSessionAgent
+      .post('/api/auth/login')
+      .set('Origin', 'http://localhost:5173')
+      .send({ email: alice.email, password: alice.password })
+      .expect(200);
+    const secondSession = {
+      ...alice,
+      agent: secondSessionAgent,
+      csrfToken: secondLogin.body.csrfToken as string,
+    };
+    const secondReclaim = await secondSession.agent
+      .post(`/api/matches/${matchID}/reclaim`)
+      .set(mutate(secondSession))
+      .expect(200);
+    expect(secondReclaim.body.playerCredentials).not.toBe(originalCredential);
+
+    await alice.agent
+      .post(`/api/matches/${matchID}/start`)
+      .set(mutate(alice))
+      .expect(200);
+    await alice.agent
+      .post(`/api/matches/${matchID}/access-ticket`)
+      .set(mutate(alice))
+      .send({
+        role: 'player',
+        playerID: '0',
+        credentials: originalCredential,
+      })
+      .expect(200);
+    await secondSession.agent
+      .post(`/api/matches/${matchID}/access-ticket`)
+      .set(mutate(secondSession))
+      .send({
+        role: 'player',
+        playerID: '0',
+        credentials: secondReclaim.body.playerCredentials,
+      })
+      .expect(200);
   });
 
   it('invalidates lobby actions after the account session is revoked', async () => {

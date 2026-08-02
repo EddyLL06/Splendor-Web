@@ -1,4 +1,5 @@
 import { LobbyClient } from 'boardgame.io/client';
+import type { RoomMatch } from '../shared/types/room.js';
 
 export class AuthenticatedLobbyClient extends LobbyClient {
   constructor(
@@ -46,5 +47,24 @@ export class AuthenticatedLobbyClient extends LobbyClient {
 
   override playAgain(gameName: string, matchID: string, body: Parameters<LobbyClient['playAgain']>[2]) {
     return super.playAgain(gameName, matchID, body, this.init(true));
+  }
+
+  async listRoomMatches(
+    gameName: string,
+    where?: Parameters<LobbyClient['listMatches']>[1],
+  ): Promise<{ matches: RoomMatch[] }> {
+    return (await super.listMatches(
+      gameName,
+      where,
+      this.init(),
+    )) as unknown as { matches: RoomMatch[] };
+  }
+
+  async getRoomMatch(gameName: string, matchID: string): Promise<RoomMatch> {
+    return (await super.getMatch(
+      gameName,
+      matchID,
+      this.init(),
+    )) as unknown as RoomMatch;
   }
 }

@@ -61,6 +61,36 @@ export const credentialSchema = z
   })
   .passthrough();
 
+export const roomSettingsSchema = z
+  .object({
+    allowSpectators: z.boolean(),
+    confirmRemoval: z.boolean().optional(),
+  })
+  .strict();
+
+export const spectatorJoinSchema = z
+  .object({
+    previousMatchID: z.string().min(1).max(128).optional(),
+  })
+  .strict();
+
+export const switchToPlayerSchema = z
+  .object({
+    playerID: z.string().regex(/^[0-3]$/).optional(),
+  })
+  .strict();
+
+export const gameAccessSchema = z.discriminatedUnion('role', [
+  z
+    .object({
+      role: z.literal('player'),
+      playerID: z.string().regex(/^[0-3]$/),
+      credentials: z.string().min(1).max(4096),
+    })
+    .strict(),
+  z.object({ role: z.literal('spectator') }).strict(),
+]);
+
 export const parseBody = <T>(schema: z.ZodType<T>, body: unknown): T => {
   const parsed = schema.safeParse(body);
   if (!parsed.success) throw invalidInput();

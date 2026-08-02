@@ -9,6 +9,7 @@ declare module 'boardgame.io/dist/cjs/core.js' {
 
 declare module 'boardgame.io/dist/cjs/server.js' {
   export const Server: typeof import('boardgame.io/server').Server;
+  export const SocketIO: typeof import('boardgame.io/server').SocketIO;
 }
 
 declare module 'boardgame.io/dist/cjs/internal.js' {

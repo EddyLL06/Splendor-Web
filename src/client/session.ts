@@ -1,9 +1,6 @@
-export interface MatchSession {
-  matchID: string;
-  playerID: string;
-  playerCredentials: string;
-  playerName: string;
-}
+import type { MatchSession } from '../shared/types/room.js';
+
+export type { MatchSession } from '../shared/types/room.js';
 
 const storageKey = (matchID: string): string =>
   `gem-council-session:${matchID}`;
@@ -15,14 +12,32 @@ export const loadMatchSession = (
   const raw = window.sessionStorage.getItem(storageKey(matchID));
   if (!raw) return null;
   try {
-    const value = JSON.parse(raw) as Partial<MatchSession>;
+    const value = JSON.parse(raw) as Partial<MatchSession> & {
+      playerID?: unknown;
+      playerCredentials?: unknown;
+      playerName?: unknown;
+    };
     if (
       value.matchID === matchID &&
+      value.mode === 'spectator' &&
+      typeof value.viewerName === 'string'
+    ) {
+      return value as MatchSession;
+    }
+    if (
+      value.matchID === matchID &&
+      (value.mode === 'player' || value.mode === undefined) &&
       typeof value.playerID === 'string' &&
       typeof value.playerCredentials === 'string' &&
       typeof value.playerName === 'string'
     ) {
-      return value as MatchSession;
+      return {
+        mode: 'player',
+        matchID,
+        playerID: value.playerID,
+        playerCredentials: value.playerCredentials,
+        playerName: value.playerName,
+      };
     }
   } catch {
     window.sessionStorage.removeItem(storageKey(matchID));

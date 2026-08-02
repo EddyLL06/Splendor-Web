@@ -45,6 +45,8 @@ test('accounts, private/public rooms, multiplayer, reconnect, localization, avat
   await bob.goto(`/?match=${encodeURIComponent(privateID)}`);
   await expect(bob.getByRole('heading', { name: 'Join shared match' })).toBeVisible();
   await bob.getByRole('button', { name: 'Claim an open seat' }).click();
+  await expect(alice.getByRole('button', { name: 'Start game' })).toBeEnabled();
+  await alice.getByRole('button', { name: 'Start game' }).click();
   await expect(alice.locator('.game-shell')).toBeVisible({ timeout: 15_000 });
   await expect(bob.locator('.game-shell')).toBeVisible({ timeout: 15_000 });
 
@@ -64,6 +66,8 @@ test('accounts, private/public rooms, multiplayer, reconnect, localization, avat
   const publicRow = bob.locator('.match-row').filter({ hasText: publicID });
   await expect(publicRow).toBeVisible({ timeout: 10_000 });
   await publicRow.getByRole('button', { name: 'Join' }).click();
+  await expect(alice.getByRole('button', { name: 'Start game' })).toBeEnabled();
+  await alice.getByRole('button', { name: 'Start game' }).click();
   await expect(alice.locator('.game-shell')).toBeVisible({ timeout: 15_000 });
   await expect(bob.locator('.game-shell')).toBeVisible({ timeout: 15_000 });
 

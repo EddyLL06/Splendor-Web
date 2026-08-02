@@ -5,6 +5,7 @@ import type { LobbyClient } from 'boardgame.io/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { LobbyScreen } from '../src/client/screens/LobbyScreen.js';
+import type { AuthenticatedLobbyClient } from '../src/client/lobby-client.js';
 
 vi.mock('../src/client/auth.js', () => ({
   localizedError: () => 'request failed',
@@ -36,30 +37,30 @@ describe('LobbyScreen match refresh', () => {
   it('loads once, supports manual refresh, and refreshes stale data on activation', async () => {
     let now = 1_000_000;
     vi.spyOn(Date, 'now').mockImplementation(() => now);
-    const listMatches = vi.fn().mockResolvedValue({ matches: [] });
-    const lobby = { listMatches } as unknown as LobbyClient;
+    const listRoomMatches = vi.fn().mockResolvedValue({ matches: [] });
+    const lobby = { listRoomMatches } as unknown as AuthenticatedLobbyClient;
     const intervalSpy = vi.spyOn(window, 'setInterval');
 
     const view = render(
       <LobbyScreen lobby={lobby} inviteMatchID={null} onSession={vi.fn()} />,
     );
 
-    await waitFor(() => expect(listMatches).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(listRoomMatches).toHaveBeenCalledTimes(1));
     expect(intervalSpy.mock.calls.some(([, delay]) => delay === 5000)).toBe(false);
 
     act(() => window.dispatchEvent(new Event('focus')));
-    expect(listMatches).toHaveBeenCalledTimes(1);
+    expect(listRoomMatches).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'common.refresh' }));
-    await waitFor(() => expect(listMatches).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(listRoomMatches).toHaveBeenCalledTimes(2));
 
     now += 15_000;
     act(() => window.dispatchEvent(new Event('focus')));
-    await waitFor(() => expect(listMatches).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(listRoomMatches).toHaveBeenCalledTimes(3));
 
     view.unmount();
     now += 15_000;
     act(() => window.dispatchEvent(new Event('focus')));
-    expect(listMatches).toHaveBeenCalledTimes(3);
+    expect(listRoomMatches).toHaveBeenCalledTimes(3);
   });
 });
