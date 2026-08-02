@@ -6,6 +6,7 @@ import i18n, { translations } from '../src/client/i18n.js';
 import {
   TURN_SOUND_STORAGE_KEY,
   canShowReservedCardDetails,
+  detectActionAnimation,
   formatActionLog,
   readTurnSoundPreference,
   reduceCardActionMode,
@@ -67,6 +68,27 @@ describe('game UI state helpers', () => {
   it('never exposes details for a hidden blind reservation', () => {
     expect(canShowReservedCardDetails(null)).toBe(false);
     expect(canShowReservedCardDetails('T1-W-01')).toBe(true);
+  });
+
+  it('detects each authoritative animation event exactly once', () => {
+    const entries: ActionLogEntry[] = [
+      logEntry('same', { playerID: '0', color: 'red' }),
+      {
+        id: 2,
+        kind: 'reserve',
+        message: 'reserved',
+        animation: { type: 'reserve-deck', playerID: '0', tier: 2 },
+      },
+      { id: 3, kind: 'final-round', message: 'final round' },
+    ];
+    const first = detectActionAnimation(entries, 0);
+    expect(first.processedThrough).toBe(3);
+    expect(first.entry?.id).toBe(2);
+    expect(first.entry?.animation).toEqual({ type: 'reserve-deck', playerID: '0', tier: 2 });
+    expect(detectActionAnimation(entries, first.processedThrough)).toEqual({
+      processedThrough: 3,
+      entry: null,
+    });
   });
 });
 

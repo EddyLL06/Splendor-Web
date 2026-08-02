@@ -58,6 +58,15 @@ describe('stable market slots', () => {
     expect(result.value.market[2].filter((_, index) => index !== slotIndex)).toEqual(
       beforeSlots.filter((_, index) => index !== slotIndex),
     );
+    expect(result.value.actionLog.at(-1)?.animation).toEqual({
+      type: 'market-card',
+      action: 'reserve',
+      playerID: '0',
+      tier: 2,
+      slotIndex,
+      cardId: cardID,
+      replacementCardId: beforeDeck[0],
+    });
   });
 
   it('leaves an explicit empty slot when the tier deck is exhausted', () => {
@@ -105,5 +114,27 @@ describe('stable market slots', () => {
         cardId: removedCardID,
       }).ok,
     ).toBe(false);
+  });
+
+  it('publishes a reserved-purchase animation only after the card is bought', () => {
+    const state = createTestState();
+    const cardID = state.decks[1].shift()!;
+    const card = requireCard(cardID);
+    state.players['0'].reservedCards.push({ cardId: cardID, tier: 1, source: 'deck' });
+    state.players['0'].tokens = paymentForCost(card.cost);
+
+    const result = applyMainAction(state, '0', '0', {
+      type: 'purchase',
+      location: { source: 'reserved', cardId: cardID },
+      payment: paymentForCost(card.cost),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.actionLog.at(-1)?.animation).toEqual({
+      type: 'reserved-purchase',
+      playerID: '0',
+      cardId: cardID,
+    });
   });
 });
