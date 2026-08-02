@@ -30,6 +30,11 @@ describe('hidden information', () => {
     expect(opponentView.players['0'].reservedCards[1].cardId).toBe(publicID);
     expect(opponentView.decks[1]).toHaveLength(state.decks[1].length);
     expect(new Set(opponentView.decks[1])).toEqual(new Set(['__hidden__']));
+
+    const spectatorView = createPlayerView(state, null);
+    expect(spectatorView.players['0'].reservedCards[0].cardId).toBeNull();
+    expect(spectatorView.players['0'].reservedCards[1].cardId).toBe(publicID);
+    expect(new Set(spectatorView.decks[1])).toEqual(new Set(['__hidden__']));
   });
 
   it('does not expose a blind reservation through animation metadata', () => {

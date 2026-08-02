@@ -25,6 +25,9 @@ import {
 import { SeatCredentialService } from '../multiplayer/credentials.js';
 import { LobbyService } from '../multiplayer/lobby.js';
 import { MemoryMatchStore } from '../multiplayer/memory-store.js';
+import { GameAccessTicketService } from '../multiplayer/access-tickets.js';
+import { AuthenticatedSocketIO } from '../multiplayer/authenticated-socketio.js';
+import { RoomRegistry } from '../multiplayer/room-registry.js';
 import { AvatarService, avatarLimits } from '../profile/avatar.js';
 import { RateLimiter } from '../security/rate-limiter.js';
 import { cleanupTemporaryUploads, prepareStorage } from '../storage/paths.js';
@@ -134,6 +137,9 @@ export interface GemCouncilApplication {
   auth: AuthService;
   avatars: AvatarService;
   lobby: LobbyService;
+  rooms: RoomRegistry;
+  accessTickets: GameAccessTicketService;
+  socketTransport: AuthenticatedSocketIO;
   start: () => Promise<{ appServer: HttpServer; apiServer?: HttpServer }>;
   stop: () => Promise<void>;
 }
@@ -163,18 +169,31 @@ export const createGemCouncilApplication = async (
   });
   const avatars = new AvatarService(database.prisma, config);
   const seatCredentials = new SeatCredentialService(database.prisma, config);
+  const accessTickets = new GameAccessTicketService(database.prisma, config);
   const matchStore = new MemoryMatchStore();
+  const rooms = new RoomRegistry();
+  const lobby = new LobbyService({
+    db: matchStore,
+    credentials: seatCredentials,
+    rooms,
+    accessTickets,
+  });
+  const socketTransport = new AuthenticatedSocketIO({
+    db: matchStore,
+    rooms,
+    tickets: accessTickets,
+  });
   const boardgame = BoardgameServer({
     games: [SplendorGame],
     db: matchStore,
     origins: config.allowedOrigins,
     apiOrigins: config.allowedOrigins,
+    transport: socketTransport,
     generateCredentials: () => {
       throw new Error('Built-in lobby credential issuance is disabled.');
     },
     authenticateCredentials: seatCredentials.authenticate,
   });
-  const lobby = new LobbyService({ db: matchStore, credentials: seatCredentials });
   const app = boardgame.app;
   app.proxy = true;
 
@@ -280,6 +299,7 @@ export const createGemCouncilApplication = async (
       const created = await createSession(database.prisma, config, userId, {
         revokeSessionID: session?.id,
       });
+      if (session) socketTransport.disconnectSession(session.id);
       sendSession(created);
       return;
     }
@@ -291,6 +311,7 @@ export const createGemCouncilApplication = async (
       const created = await createSession(database.prisma, config, userId, {
         revokeSessionID: session?.id,
       });
+      if (session) socketTransport.disconnectSession(session.id);
       sendSession(created);
       return;
     }
@@ -298,6 +319,7 @@ export const createGemCouncilApplication = async (
     if (ctx.method === 'POST' && ctx.path === '/api/auth/logout') {
       const authenticated = requireProtectedMutation();
       await revokeSession(database.prisma, authenticated.id);
+      socketTransport.disconnectSession(authenticated.id);
       clearSessionCookie(ctx, config);
       ctx.body = { ok: true };
       return;
@@ -319,6 +341,7 @@ export const createGemCouncilApplication = async (
       assertOrigin(ctx, config);
       const input = parseBody(passwordResetSchema, await parseJsonBody());
       const userId = await auth.resetPassword({ ...input, ip: ctx.ip });
+      socketTransport.disconnectUser(userId);
       const created = await createSession(database.prisma, config, userId);
       sendSession(created);
       return;
@@ -415,7 +438,7 @@ export const createGemCouncilApplication = async (
         return;
       }
       if (ctx.method === 'GET' && ctx.path === `/games/${SplendorGame.name}`) {
-        ctx.body = await lobby.list(ctx.query);
+        ctx.body = await lobby.list(authenticated, ctx.query);
         return;
       }
       if (ctx.method === 'POST' && ctx.path === `/games/${SplendorGame.name}/create`) {
@@ -430,7 +453,7 @@ export const createGemCouncilApplication = async (
         const matchID = decodePathSegment(matchRoute[1]);
         const action = matchRoute[2];
         if (ctx.method === 'GET' && !action) {
-          ctx.body = await lobby.get(matchID);
+          ctx.body = await lobby.get(authenticated, matchID);
           return;
         }
         if (ctx.method === 'POST' && action === 'join') {
@@ -459,6 +482,84 @@ export const createGemCouncilApplication = async (
       return;
     }
 
+    const roomActionRoute = routeMatch(
+      ctx.path,
+      /^\/api\/matches\/([^/]+)\/(room|start|roles\/spectator|roles\/player|spectators\/join|spectators|spectators\/heartbeat|access-ticket)$/,
+    );
+    if (roomActionRoute) {
+      const matchID = decodePathSegment(roomActionRoute[1]);
+      const action = roomActionRoute[2];
+      if (ctx.method === 'GET' && action === 'room') {
+        ctx.body = await lobby.get(requireSession(session), matchID);
+        return;
+      }
+      const authenticated = requireProtectedMutation();
+      if (ctx.method === 'PATCH' && action === 'room') {
+        ctx.body = await lobby.updateRoomSettings(
+          authenticated,
+          matchID,
+          await parseJsonBody(),
+        );
+        return;
+      }
+      if (ctx.method === 'POST' && action === 'start') {
+        ctx.body = await lobby.start(authenticated, matchID);
+        return;
+      }
+      if (ctx.method === 'POST' && action === 'roles/spectator') {
+        ctx.body = await lobby.switchToSpectator(
+          authenticated,
+          matchID,
+          await parseJsonBody(),
+        );
+        return;
+      }
+      if (ctx.method === 'POST' && action === 'roles/player') {
+        ctx.body = await lobby.switchToPlayer(
+          authenticated,
+          matchID,
+          await parseJsonBody(),
+        );
+        return;
+      }
+      if (ctx.method === 'POST' && action === 'spectators/join') {
+        rateLimiter.consume(`spectate:user:${authenticated.user.id}:${matchID}`, {
+          limit: 30,
+          windowMs: 60_000,
+        });
+        rateLimiter.consume(`spectate:ip:${ctx.ip}`, {
+          limit: 120,
+          windowMs: 60_000,
+        });
+        ctx.body = await lobby.spectate(
+          authenticated,
+          matchID,
+          await parseJsonBody(),
+        );
+        return;
+      }
+      if (ctx.method === 'DELETE' && action === 'spectators') {
+        ctx.body = await lobby.leaveSpectator(authenticated, matchID);
+        return;
+      }
+      if (ctx.method === 'POST' && action === 'spectators/heartbeat') {
+        rateLimiter.consume(`spectator-heartbeat:${authenticated.user.id}:${matchID}`, {
+          limit: 30,
+          windowMs: 60_000,
+        });
+        ctx.body = await lobby.heartbeat(authenticated, matchID);
+        return;
+      }
+      if (ctx.method === 'POST' && action === 'access-ticket') {
+        ctx.body = await lobby.issueGameAccess(
+          authenticated,
+          matchID,
+          await parseJsonBody(),
+        );
+        return;
+      }
+    }
+
     ctx.status = 404;
     ctx.body = { error: { code: 'INVALID_INPUT' } };
   });
@@ -474,6 +575,9 @@ export const createGemCouncilApplication = async (
     auth,
     avatars,
     lobby,
+    rooms,
+    accessTickets,
+    socketTransport,
     start: async () => {
       if (running) return running;
       const started = await boardgame.run(config.port);

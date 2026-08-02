@@ -45,11 +45,22 @@ const parsePayload = (encoded: string): SeatCredentialPayload | null => {
 };
 
 export class SeatCredentialService {
+  private readonly issuedCredentials = new Map<string, string>();
+
   constructor(
     private readonly prisma: PrismaClient,
     private readonly config: AppConfig,
     private readonly now: () => Date = () => new Date(),
   ) {}
+
+  private credentialKey(input: {
+    userId: string;
+    sessionId: string;
+    matchId: string;
+    playerId: string;
+  }): string {
+    return [input.matchId, input.playerId, input.userId, input.sessionId].join('\u001f');
+  }
 
   issue(input: {
     userId: string;
@@ -58,6 +69,9 @@ export class SeatCredentialService {
     playerId: string;
     sessionExpiresAt: Date;
   }): string {
+    const key = this.credentialKey(input);
+    const existing = this.issuedCredentials.get(key);
+    if (existing) return existing;
     const payload: SeatCredentialPayload = {
       v: 1,
       uid: input.userId,
@@ -69,7 +83,23 @@ export class SeatCredentialService {
     };
     const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const signature = hmac(this.config.gameCredentialSecret, `seat:${encoded}`);
-    return `${encoded}.${signature}`;
+    const credential = `${encoded}.${signature}`;
+    this.issuedCredentials.set(key, credential);
+    return credential;
+  }
+
+  revokeSeat(matchId: string, playerId: string): void {
+    const prefix = `${matchId}\u001f${playerId}\u001f`;
+    for (const key of this.issuedCredentials.keys()) {
+      if (key.startsWith(prefix)) this.issuedCredentials.delete(key);
+    }
+  }
+
+  revokeMatch(matchId: string): void {
+    const prefix = `${matchId}\u001f`;
+    for (const key of this.issuedCredentials.keys()) {
+      if (key.startsWith(prefix)) this.issuedCredentials.delete(key);
+    }
   }
 
   authenticate = async (
@@ -80,8 +110,7 @@ export class SeatCredentialService {
       data?: SeatMetadata;
     } | undefined,
   ): Promise<boolean> => {
-    if (!credential || !playerMetadata?.credentials || !playerMetadata.data) return false;
-    if (!constantTimeEqual(credential, playerMetadata.credentials)) return false;
+    if (!credential || !playerMetadata?.data) return false;
     const parts = credential.split('.');
     if (parts.length !== 2) return false;
     const expected = hmac(this.config.gameCredentialSecret, `seat:${parts[0]}`);
@@ -95,6 +124,17 @@ export class SeatCredentialService {
       payload.pid !== data.playerId ||
       payload.pid !== String(playerMetadata.id)
     ) {
+      return false;
+    }
+    const activeCredential = this.issuedCredentials.get(
+      this.credentialKey({
+        userId: payload.uid,
+        sessionId: payload.sid,
+        matchId: payload.mid,
+        playerId: payload.pid,
+      }),
+    );
+    if (!activeCredential || !constantTimeEqual(credential, activeCredential)) {
       return false;
     }
     const session = await this.prisma.session.findUnique({

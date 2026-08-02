@@ -32,6 +32,10 @@ import type {
   TokenColor,
   TokenCounts,
 } from '../../shared/types/game.js';
+import type {
+  PlayerConnectionStatus,
+  PublicRoomState,
+} from '../../shared/types/room.js';
 import { localizedError } from '../auth.js';
 import {
   canShowReservedCardDetails,
@@ -49,6 +53,7 @@ import { DevelopmentCardView } from './DevelopmentCardView.js';
 import { PaymentPanel } from './PaymentPanel.js';
 import { DiscardPanel, NoblePanel } from './ResolutionPanels.js';
 import { TokenBadge } from './TokenBadge.js';
+import { SpectatorPopover } from './SpectatorPopover.js';
 
 interface MoveAPI {
   mainAction: (action: MainAction) => void;
@@ -59,10 +64,14 @@ interface MoveAPI {
 export interface GameBoardProps extends BoardProps<SplendorState> {
   playerNames: Record<string, string>;
   playerAvatars: Record<string, string>;
+  playerConnections?: Record<string, PlayerConnectionStatus>;
   accountMenu: ReactNode;
+  sessionMode: 'player' | 'spectator';
+  room: PublicRoomState;
   onLeaveMatch: () => void;
   onReturnToLobby: () => void;
-  onPlayAgain: () => Promise<void>;
+  onPlayAgain?: () => Promise<void>;
+  onWatchRematch?: () => Promise<void>;
 }
 
 interface PopoverPosition {
@@ -240,6 +249,7 @@ function PlayerSummary({
   isCurrent,
   isLocal,
   avatarUrl,
+  connectionStatus,
 }: {
   state: SplendorState;
   id: string;
@@ -247,6 +257,7 @@ function PlayerSummary({
   isCurrent: boolean;
   isLocal: boolean;
   avatarUrl: string;
+  connectionStatus: PlayerConnectionStatus;
 }) {
   const { t } = useTranslation();
   const player = state.players[id];
@@ -265,6 +276,16 @@ function PlayerSummary({
           <span>
             {t('game.seat', { number: Number(id) + 1 })}
             {isLocal ? ` · ${t('common.you')}` : ''}
+          </span>
+          <span
+            className={`player-connection-status connection-${connectionStatus}`}
+            aria-label={t('game.connectionStatus', {
+              player: name,
+              status: t(`game.connection.${connectionStatus}`),
+            })}
+          >
+            <span className="player-connection-dot" aria-hidden="true" />
+            {t(`game.connection.${connectionStatus}`)}
           </span>
         </div>
         <div className="score-pill">
@@ -523,12 +544,16 @@ function MarketTier({
 function GameOverPanel({
   state,
   names,
+  room,
   onPlayAgain,
+  onWatchRematch,
   onReturn,
 }: {
   state: SplendorState;
   names: Record<string, string>;
-  onPlayAgain: () => Promise<void>;
+  room: PublicRoomState;
+  onPlayAgain?: () => Promise<void>;
+  onWatchRematch?: () => Promise<void>;
   onReturn: () => void;
 }) {
   const { t } = useTranslation();
@@ -544,6 +569,7 @@ function GameOverPanel({
           {state.result.winners.length > 1 ? t('game.sharedVictory') : t('game.victory')}
         </h2>
         <p className="winner-line">{winners}</p>
+        <div className="game-over-spectators"><SpectatorPopover room={room} /></div>
         <div className="standings">
           {state.result.standings.map((standing, index) => (
             <div className="standing-row" key={standing.playerID}>
@@ -557,23 +583,44 @@ function GameOverPanel({
         {error && <div className="inline-error">{error}</div>}
         <div className="modal-actions">
           <button type="button" className="button button-ghost" onClick={onReturn}>{t('game.returnLobby')}</button>
-          <button
-            type="button"
-            className="button button-primary"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true);
-              setError('');
-              try {
-                await onPlayAgain();
-              } catch (caught) {
-                setError(localizedError(caught));
-                setBusy(false);
-              }
-            }}
-          >
-            {busy ? t('game.preparing') : t('game.playAgain')}
-          </button>
+          {onPlayAgain && (
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setError('');
+                try {
+                  await onPlayAgain();
+                } catch (caught) {
+                  setError(localizedError(caught));
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy ? t('game.preparing') : t('game.playAgain')}
+            </button>
+          )}
+          {onWatchRematch && (
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setError('');
+                try {
+                  await onWatchRematch();
+                } catch (caught) {
+                  setError(localizedError(caught));
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy ? t('game.preparing') : t('game.watchRematch')}
+            </button>
+          )}
         </div>
       </section>
     </div>
@@ -603,13 +650,18 @@ export function GameBoard(props: GameBoardProps) {
     isConnected,
     playerNames,
     playerAvatars,
+    playerConnections = {},
     accountMenu,
+    sessionMode,
+    room,
     onLeaveMatch,
     onReturnToLobby,
     onPlayAgain,
+    onWatchRematch,
   } = props;
   const moveAPI = moves as unknown as MoveAPI;
   const localID = playerID ?? null;
+  const isSpectator = sessionMode === 'spectator';
   const localPlayer = localID === null ? null : G.players[localID];
   const isLocalTurn = localID !== null && ctx.currentPlayer === localID;
   const canTakeMainAction = isLocalTurn && isConnected !== false && G.pending === null && G.result === null;
@@ -801,7 +853,7 @@ export function GameBoard(props: GameBoardProps) {
     : null;
 
   return (
-    <div className={`game-shell${isLocalTurn && !G.result ? ' local-turn-active' : ''}`}>
+    <div className={`game-shell${isLocalTurn && !isSpectator && !G.result ? ' local-turn-active' : ''}`}>
       <div className="turn-edge-highlight" aria-hidden="true" />
       {turnNoticeVisible && (
         <div key={turnNotice} className="your-turn-popup" aria-hidden="true">
@@ -823,12 +875,13 @@ export function GameBoard(props: GameBoardProps) {
         <div className="turn-banner">
           <span className={`connection-dot${isConnected ? ' online' : ''}`} />
           <div>
-            <span>{isLocalTurn ? t('game.yourTurn') : t('game.currentPlayer')}</span>
+            <span>{isSpectator ? t('game.spectating') : isLocalTurn ? t('game.yourTurn') : t('game.currentPlayer')}</span>
             <strong>{playerName(playerNames, ctx.currentPlayer, t)}</strong>
           </div>
           {G.finalRound && <span className="final-badge">{t('game.finalRound')}</span>}
         </div>
         <div className="header-actions">
+          <SpectatorPopover room={room} />
           <button
             type="button"
             className="button button-ghost button-small"
@@ -840,16 +893,16 @@ export function GameBoard(props: GameBoardProps) {
           >
             {copied ? t('game.linkCopied') : t('game.copyInvite')}
           </button>
-          <button type="button" className="button button-quiet button-small" onClick={onLeaveMatch}>
-            {t('game.leave')}
+          <button type="button" className="button button-quiet button-small" onClick={isSpectator ? onReturnToLobby : onLeaveMatch}>
+            {t('game.returnLobby')}
           </button>
           {accountMenu}
         </div>
       </header>
 
-      <main className="game-workspace">
-        <section className="upper-play-area">
-          <aside className="reserved-column">
+      <main className={`game-workspace${isSpectator ? ' spectator-workspace' : ''}`}>
+        <section className={`upper-play-area${isSpectator ? ' spectator-play-area' : ''}`}>
+          {!isSpectator && <aside className="reserved-column">
             <section className="action-card reserved-section">
               <div className="section-heading compact-heading">
                 <div>
@@ -882,7 +935,7 @@ export function GameBoard(props: GameBoardProps) {
                 <p className="empty-copy reserved-empty-state">{t('game.reserveHelp')}</p>
               )}
             </section>
-          </aside>
+          </aside>}
 
           <div className="table-column">
             <section className="nobles-panel">
@@ -915,15 +968,26 @@ export function GameBoard(props: GameBoardProps) {
           </div>
 
           <aside className="actions-column right-column">
-            <TokenTakePanel
-              state={G}
-              playerID={localID}
-              currentPlayerID={ctx.currentPlayer}
-              enabled={canTakeMainAction && !isSubmitting && actionMode === null}
-              blockedGuidance={actionMode ? modeGuidance : undefined}
-              resetKey={actionMode ?? 'none'}
-              onAction={sendMainAction}
-            />
+            {isSpectator && (
+              <section className="action-card spectator-status-card">
+                <div className="section-heading compact-heading">
+                  <div><span className="eyebrow">{t('game.liveView')}</span><h2>{t('game.spectating')}</h2></div>
+                  <span aria-hidden="true">👁</span>
+                </div>
+                <p className="empty-copy">{t('game.spectatorHelp')}</p>
+              </section>
+            )}
+            {!isSpectator && (
+              <TokenTakePanel
+                state={G}
+                playerID={localID}
+                currentPlayerID={ctx.currentPlayer}
+                enabled={canTakeMainAction && !isSubmitting && actionMode === null}
+                blockedGuidance={actionMode ? modeGuidance : undefined}
+                resetKey={actionMode ?? 'none'}
+                onAction={sendMainAction}
+              />
+            )}
             <section className="action-card log-section">
               <div className="section-heading compact-heading">
                 <div>
@@ -944,7 +1008,7 @@ export function GameBoard(props: GameBoardProps) {
           </aside>
         </section>
 
-        <section className="card-action-toolbar" aria-label={t('game.cardActions')}>
+        {!isSpectator && <section className="card-action-toolbar" aria-label={t('game.cardActions')}>
           <div className="toolbar-buttons">
             <button
               type="button"
@@ -966,7 +1030,7 @@ export function GameBoard(props: GameBoardProps) {
             </button>
           </div>
           <p>{modeGuidance}</p>
-        </section>
+        </section>}
 
         <section className="players-strip-section">
           <div className="section-heading player-strip-heading">
@@ -985,6 +1049,7 @@ export function GameBoard(props: GameBoardProps) {
                 isCurrent={ctx.currentPlayer === id}
                 isLocal={localID === id}
                 avatarUrl={playerAvatars[id] ?? ''}
+                connectionStatus={playerConnections[id] ?? 'reconnecting'}
               />
             ))}
           </div>
@@ -1043,7 +1108,14 @@ export function GameBoard(props: GameBoardProps) {
         <NoblePanel nobleIDs={G.pending.eligibleNobleIds} onChoose={(nobleID) => moveAPI.chooseNoble(nobleID)} />
       )}
 
-      <GameOverPanel state={G} names={playerNames} onPlayAgain={onPlayAgain} onReturn={onReturnToLobby} />
+      <GameOverPanel
+        state={G}
+        names={playerNames}
+        room={room}
+        onPlayAgain={onPlayAgain}
+        onWatchRematch={onWatchRematch}
+        onReturn={onReturnToLobby}
+      />
     </div>
   );
 }

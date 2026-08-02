@@ -59,21 +59,58 @@ describe('Socket.IO account-session enforcement', () => {
       .set(mutate(bob))
       .send({ playerID: '1', playerName: 'forged' })
       .expect(200);
+    await alice.agent
+      .post(`/api/matches/${matchID}/start`)
+      .set(mutate(alice))
+      .expect(200);
+    const aliceAccess = await alice.agent
+      .post(`/api/matches/${matchID}/access-ticket`)
+      .set(mutate(alice))
+      .send({
+        role: 'player',
+        playerID: '0',
+        credentials: aliceSeat.body.playerCredentials,
+      })
+      .expect(200);
+    const bobAccess = await bob.agent
+      .post(`/api/matches/${matchID}/access-ticket`)
+      .set(mutate(bob))
+      .send({
+        role: 'player',
+        playerID: '1',
+        credentials: bobSeat.body.playerCredentials,
+      })
+      .expect(200);
     const server = `http://localhost:${environment.config.port}`;
-    const makeClient = (playerID: string, credentials: string): GameClient => {
+    const makeClient = (
+      playerID: string,
+      credentials: string,
+      accessTicket: string,
+    ): GameClient => {
       const client = Client<SplendorState>({
         game: SplendorGame,
         matchID,
         playerID,
         credentials,
-        multiplayer: SocketIO({ server }),
+        multiplayer: SocketIO({
+          server,
+          socketOpts: { auth: { accessTicket } },
+        }),
       });
       clients.push(client);
       client.start();
       return client;
     };
-    const aliceClient = makeClient('0', aliceSeat.body.playerCredentials as string);
-    const bobClient = makeClient('1', bobSeat.body.playerCredentials as string);
+    const aliceClient = makeClient(
+      '0',
+      aliceSeat.body.playerCredentials as string,
+      aliceAccess.body.accessTicket as string,
+    );
+    const bobClient = makeClient(
+      '1',
+      bobSeat.body.playerCredentials as string,
+      bobAccess.body.accessTicket as string,
+    );
     await waitFor(() => Boolean(aliceClient.getState()?.isConnected && bobClient.getState()?.isConnected));
     const currentPlayer = aliceClient.getState()!.ctx.currentPlayer;
     const actor = currentPlayer === '0' ? alice : bob;
