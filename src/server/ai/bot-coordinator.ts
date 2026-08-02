@@ -64,6 +64,7 @@ export class BotCoordinator {
         pool: this.pool,
         weights: this.dependencies.weights,
         hardMaxMs: this.dependencies.config.aiBotHardMaxMs,
+        expertEnabled: this.dependencies.config.aiBotExpertEnabled,
         onError: (error) => {
           console.error(`[bot-controller] ${matchID}/${seatID}:`, error);
         },

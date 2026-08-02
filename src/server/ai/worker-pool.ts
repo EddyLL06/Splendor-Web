@@ -10,11 +10,13 @@ import { Worker } from 'node:worker_threads';
 
 import type { HardDecisionInput } from '../../shared/ai/search/beam.js';
 import { computeHardDecision } from '../../shared/ai/search/beam.js';
+import { computeExpertDecision } from '../../shared/ai/search/micro-mcts.js';
 import type { BotDecision } from '../../shared/ai/types.js';
 
 interface QueuedJob {
   id: number;
   input: HardDecisionInput;
+  mode: 'hard' | 'expert';
   priority: 'live' | 'background';
   resolve: (decision: BotDecision) => void;
   reject: (error: Error) => void;
@@ -62,9 +64,26 @@ export class AiWorkerPool {
     input: HardDecisionInput,
     priority: 'live' | 'background' = 'live',
   ): Promise<BotDecision> {
+    return this.request(input, 'hard', priority);
+  }
+
+  async requestExpertDecision(
+    input: HardDecisionInput,
+    priority: 'live' | 'background' = 'live',
+  ): Promise<BotDecision> {
+    return this.request(input, 'expert', priority);
+  }
+
+  private async request(
+    input: HardDecisionInput,
+    mode: 'hard' | 'expert',
+    priority: 'live' | 'background',
+  ): Promise<BotDecision> {
     if (this.disposed) throw new Error('AiWorkerPool is disposed.');
     if (this.options.workerCount === 0) {
-      return computeHardDecision(input);
+      return mode === 'hard'
+        ? computeHardDecision(input)
+        : computeExpertDecision(input);
     }
     if (this.queue.length + this.pending.size >= this.options.queueLimit) {
       throw new Error('AI_BOT_QUEUE_FULL');
@@ -80,6 +99,7 @@ export class AiWorkerPool {
       const job: QueuedJob = {
         id,
         input,
+        mode,
         priority,
         resolve,
         reject,
@@ -188,7 +208,7 @@ export class AiWorkerPool {
   private runOnWorker(worker: Worker, job: QueuedJob): void {
     job.worker = worker;
     this.pending.set(job.id, job);
-    worker.postMessage({ id: job.id, input: job.input });
+    worker.postMessage({ id: job.id, mode: job.mode, input: job.input });
   }
 }
 

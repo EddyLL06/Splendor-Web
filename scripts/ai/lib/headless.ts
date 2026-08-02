@@ -118,6 +118,7 @@ export const runGame = (
       'cheap-greedy-v1': createDecisionStats(),
       'normal-v1': createDecisionStats(),
       'hard-v1': createDecisionStats(),
+      'expert-v1': createDecisionStats(),
     },
   };
 

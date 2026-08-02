@@ -12,6 +12,7 @@ import {
 import { scoreCandidate } from './evaluate.js';
 import { evaluateWithWeights } from './evaluate.js';
 import { computeHardDecision } from './search/beam.js';
+import { computeExpertDecision } from './search/micro-mcts.js';
 import { chooseNormalMove } from './policy-normal.js';
 import {
   IllegalCandidateError,
@@ -126,6 +127,23 @@ export const chooseBotMove = (
         beamWidth: 5,
         maxDeterminizations: 1,
         maxSimulations: 0,
+      },
+    });
+    validateMove(fullState, observation.playerID, ctx, decision);
+    return decision;
+  }
+  if (options.policy === 'expert-v1') {
+    const decision = computeExpertDecision({
+      observation,
+      ctx,
+      seed: options.seed,
+      weights: options.weights ?? {},
+      budget: {
+        deadlineEpochMs: performance.now() + (options.budgetMs ?? 120),
+        maxNodes: 800,
+        beamWidth: 3,
+        maxDeterminizations: 4,
+        maxSimulations: 150,
       },
     });
     validateMove(fullState, observation.playerID, ctx, decision);

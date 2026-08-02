@@ -58,7 +58,8 @@ const main = async (): Promise<void> => {
   const modelPath = values.get('model');
   const candidatePolicy = (values.get('policy') ?? 'normal-v1') as
     | 'normal-v1'
-    | 'hard-v1';
+    | 'hard-v1'
+    | 'expert-v1';
   const baseline = values.get('baseline') ?? 'uniform-random-v1';
   const rotateSeats = values.get('rotate-seats') !== 'false';
   const output = resolve(
@@ -67,8 +68,12 @@ const main = async (): Promise<void> => {
   const maxActions = Number(values.get('max-actions') ?? '3000');
 
   if (!modelPath) throw new Error('--model is required.');
-  if (candidatePolicy !== 'normal-v1' && candidatePolicy !== 'hard-v1') {
-    throw new Error('--policy must be normal-v1 or hard-v1.');
+  if (
+    candidatePolicy !== 'normal-v1' &&
+    candidatePolicy !== 'hard-v1' &&
+    candidatePolicy !== 'expert-v1'
+  ) {
+    throw new Error('--policy must be normal-v1, hard-v1 or expert-v1.');
   }
   if (players.some((count) => ![2, 3, 4].includes(count))) {
     throw new Error('--players must be 2,3 and/or 4.');
@@ -124,7 +129,10 @@ const main = async (): Promise<void> => {
     if (baselineAgent === 'normal-v1' && baselineWeights) {
       weightsByAgent[baselineAgent] = baselineWeights;
     }
-    if (candidatePolicy === 'hard-v1' && baselineAgent === 'hard-v1') {
+    if (
+      baselineAgent !== 'uniform-random-v1' &&
+      baselineAgent !== 'cheap-greedy-v1'
+    ) {
       weightsByAgent[baselineAgent] = baselineWeights ?? candidateWeights;
     }
     results.push(

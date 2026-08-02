@@ -21,6 +21,7 @@ import {
   chooseBotMove,
 } from '../../shared/ai/policy.js';
 import { computeHardDecision } from '../../shared/ai/search/beam.js';
+import { computeExpertDecision } from '../../shared/ai/search/micro-mcts.js';
 import { createObservation } from '../../shared/ai/observation.js';
 import { createSeededRNG } from '../../shared/ai/seeded-rng.js';
 import type {
@@ -49,6 +50,7 @@ export interface BotControllerOptions {
   pool?: AiWorkerPool;
   weights: Record<string, number>;
   hardMaxMs: number;
+  expertEnabled: boolean;
 }
 
 export class BotController {
@@ -175,8 +177,11 @@ export class BotController {
         weights: this.options.weights,
       });
     }
+    const expertMode =
+      this.options.difficulty === 'expert' && this.options.expertEnabled;
     const budget = {
-      deadlineEpochMs: performance.now() + this.options.hardMaxMs,
+      deadlineEpochMs:
+        performance.now() + (expertMode ? 120 : this.options.hardMaxMs),
       maxNodes: 800,
       beamWidth: 5,
       maxDeterminizations: 1,
@@ -184,24 +189,27 @@ export class BotController {
     };
     try {
       if (this.options.pool) {
-        return await this.options.pool.requestHardDecision(
-          {
-            observation,
-            ctx,
-            seed,
-            weights: this.options.weights,
-            budget,
-          },
-          'live',
-        );
+        const input = {
+          observation,
+          ctx,
+          seed,
+          weights: this.options.weights,
+          budget,
+        };
+        return expertMode
+          ? await this.options.pool.requestExpertDecision(input, 'live')
+          : await this.options.pool.requestHardDecision(input, 'live');
       }
-      return computeHardDecision({
+      const input = {
         observation,
         ctx,
         seed,
         weights: this.options.weights,
         budget,
-      });
+      };
+      return expertMode
+        ? computeExpertDecision(input)
+        : computeHardDecision(input);
     } catch {
       const fallback = chooseBotMove(observation, ctx, {
         policy: 'normal-v1',

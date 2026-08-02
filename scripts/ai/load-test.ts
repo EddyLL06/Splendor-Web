@@ -61,7 +61,13 @@ const main = async (): Promise<void> => {
   if (concurrency.some((value) => !Number.isSafeInteger(value) || value < 1)) {
     throw new Error('--concurrent-games must be a positive integer list.');
   }
-  const agent = (difficulty === 'hard' ? 'hard-v1' : difficulty) as AgentPolicyID;
+  const agent = (
+    difficulty === 'hard'
+      ? 'hard-v1'
+      : difficulty === 'expert'
+        ? 'expert-v1'
+        : difficulty
+  ) as AgentPolicyID;
   if (!AI_AGENTS.includes(agent)) {
     throw new Error('--difficulty must be an agent policy id.');
   }
@@ -86,6 +92,7 @@ const main = async (): Promise<void> => {
     GAME_CREDENTIAL_SECRET: 'load-test-game-secret-material-000000000001',
     AI_BOT_WORKERS: '2',
     AI_BOT_HARD_MAX_MS: '80',
+    AI_BOT_EXPERT_ENABLED: 'true',
   });
   execFileSync(
     process.execPath,

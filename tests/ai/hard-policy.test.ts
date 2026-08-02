@@ -123,3 +123,52 @@ describe('Hard beam search', () => {
     }
   }, 20_000);
 });
+
+describe('Expert micro-MCTS', () => {
+  const expertDecision = (
+    state: SplendorState,
+    playerID: string,
+    seed: string,
+    budgetMs = 120,
+  ) => {
+    const observation = createObservation(
+      createPlayerView(state, playerID),
+      playerID,
+      ctxFor(state, playerID),
+    );
+    return chooseBotMove(observation, ctxFor(state, playerID), {
+      policy: 'expert-v1',
+      seed,
+      weights,
+      budgetMs,
+    });
+  };
+
+  it('is deterministic and invariant to hidden truth', () => {
+    const { state } = createSeededState(2, 'expert-det');
+    const actor = state.initialFirstPlayer;
+    expect(expertDecision(state, actor, 'expert-seed').move).toEqual(
+      expertDecision(state, actor, 'expert-seed').move,
+    );
+    const { first, second } = samePlayerViewStates();
+    expect(expertDecision(second, '1', 'fair', 60).move).toEqual(
+      expertDecision(first, '1', 'fair', 60).move,
+    );
+  });
+
+  it('produces legal moves under a tight budget', () => {
+    const { state } = createSeededState(2, 'expert-legal');
+    const actor = state.initialFirstPlayer;
+    const decision = expertDecision(state, actor, 'legal', 40);
+    const sim = createSimulation(structuredClone(state), ctxFor(state, actor));
+    const [argument] = decision.move.args;
+    const result =
+      decision.move.move === 'mainAction'
+        ? applySimulationMainAction(sim, actor, argument as MainAction)
+        : decision.move.move === 'discardTokens'
+          ? applySimulationDiscard(sim, actor, argument as TokenCounts)
+          : applySimulationNoble(sim, actor, argument as string);
+    expect(result.ok).toBe(true);
+    expect(decision.policy).toBe('expert-v1');
+  });
+});

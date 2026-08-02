@@ -34,6 +34,7 @@ export interface AppConfig {
   aiBotWorkers: number;
   aiBotQueueLimit: number;
   aiBotHardMaxMs: number;
+  aiBotExpertEnabled: boolean;
 }
 
 const parseInteger = (
@@ -267,6 +268,7 @@ export const createConfig = (
     aiBotWorkers: parseAiBotWorkers(env),
     aiBotQueueLimit: parseInteger(env, 'AI_BOT_QUEUE_LIMIT', 256, 1, 10_000),
     aiBotHardMaxMs: parseInteger(env, 'AI_BOT_HARD_MAX_MS', 80, 1, 1000),
+    aiBotExpertEnabled: parseBoolean(env, 'AI_BOT_EXPERT_ENABLED', false),
     defaultLocale: 'en',
   };
 };
