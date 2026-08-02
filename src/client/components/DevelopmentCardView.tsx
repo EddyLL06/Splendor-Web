@@ -1,47 +1,48 @@
 import { useTranslation } from 'react-i18next';
 
 import { NORMAL_COLORS } from '../../shared/constants/colors.js';
-import { analyzePayment } from '../../shared/rules/selectors.js';
-import type {
-  CardLocation,
-  DevelopmentCard,
-  PlayerID,
-  SplendorState,
-} from '../../shared/types/game.js';
+import type { DevelopmentCard } from '../../shared/types/game.js';
+import type { CardActionMode } from '../gameUiState.js';
 import { TokenBadge } from './TokenBadge.js';
+
+export type DevelopmentCardVariant =
+  | 'market'
+  | 'reserved-detail'
+  | 'preview'
+  | 'flight';
 
 interface DevelopmentCardViewProps {
   card: DevelopmentCard;
-  state: SplendorState;
-  playerID: PlayerID | null;
-  location: CardLocation;
-  interactive: boolean;
-  canReserve?: boolean;
-  onBuy: (card: DevelopmentCard, location: CardLocation) => void;
-  onReserve?: (card: DevelopmentCard) => void;
+  mode?: CardActionMode;
+  selectable?: boolean;
+  onSelect?: () => void;
+  animationKey?: string;
+  replacing?: boolean;
+  variant?: DevelopmentCardVariant;
 }
 
 export function DevelopmentCardView({
   card,
-  state,
-  playerID,
-  location,
-  interactive,
-  canReserve = false,
-  onBuy,
-  onReserve,
+  mode = null,
+  selectable = false,
+  onSelect,
+  animationKey,
+  replacing = false,
+  variant = 'market',
 }: DevelopmentCardViewProps) {
   const { t } = useTranslation();
-  const paymentErrors =
-    playerID === null
-      ? [{ message: t('game.joinToBuy') }]
-      : analyzePayment(state, playerID, card).errors;
-  const canBuy = interactive && paymentErrors.length === 0;
-
-  return (
-    <article className={`development-card bonus-${card.bonus}`}>
+  const className = `development-card development-card-${variant} bonus-${card.bonus}${
+    mode ? ` card-mode-${mode}` : ' card-informational'
+  }${selectable ? ' card-selectable' : ''}${mode && !selectable ? ' card-unavailable' : ''}${
+    replacing ? ' card-replacing' : ''
+  }`;
+  const content = (
+    <>
       <div className="card-topline">
-        <span className="card-tier">{t('game.tier', { tier: card.tier })}</span>
+        <span className="card-identity">
+          <span className="card-tier">{t('game.tier', { tier: card.tier })}</span>
+          {variant !== 'market' && <strong className="card-id">{card.id}</strong>}
+        </span>
         <span className="card-points" aria-label={t('game.standingPrestige', { count: card.points })}>
           {card.points} <span aria-hidden="true">◆</span>
         </span>
@@ -52,43 +53,42 @@ export function DevelopmentCardView({
       </div>
       <div className="card-cost" aria-label={t('game.cardCost')}>
         {NORMAL_COLORS.filter((color) => card.cost[color] > 0).map((color) => (
-          <TokenBadge
-            key={color}
-            color={color}
-            count={card.cost[color]}
-            compact
-          />
+          <TokenBadge key={color} color={color} count={card.cost[color]} compact />
         ))}
         {NORMAL_COLORS.every((color) => card.cost[color] === 0) && (
           <span className="free-label">{t('game.free')}</span>
         )}
       </div>
-      <div className="card-actions">
-        <button
-          type="button"
-          className="button button-primary button-small"
-          disabled={!canBuy}
-          title={canBuy ? t('game.buyCard') : t('errors.INVALID_INPUT')}
-          onClick={() => onBuy(card, location)}
-        >
-          {t('game.buy')}
-        </button>
-        {location.source === 'market' && onReserve && (
-          <button
-            type="button"
-            className="button button-ghost button-small"
-            disabled={!interactive || !canReserve}
-            title={
-              canReserve
-                ? t('game.reserveVisible')
-                : t('game.cannotReserve')
-            }
-            onClick={() => onReserve(card)}
-          >
-            {t('game.reserve')}
-          </button>
-        )}
-      </div>
-    </article>
+      {mode && (
+        <span className="card-mode-label">
+          {selectable
+            ? t(mode === 'buy' ? 'game.selectToBuy' : 'game.selectToReserve')
+            : t('game.cardUnavailable')}
+        </span>
+      )}
+    </>
+  );
+
+  if (!mode) {
+    return (
+      <article className={className} data-animation-key={animationKey}>
+        {content}
+      </article>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={className}
+      disabled={!selectable}
+      onClick={onSelect}
+      data-animation-key={animationKey}
+      aria-label={t(mode === 'buy' ? 'game.buyCardNamed' : 'game.reserveCardNamed', {
+        id: card.id,
+      })}
+    >
+      {content}
+    </button>
   );
 }

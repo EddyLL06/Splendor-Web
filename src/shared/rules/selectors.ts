@@ -252,7 +252,7 @@ export const createStandings = (state: SplendorState): FinalStanding[] =>
 export const validateStateReferences = (state: SplendorState): void => {
   for (const tier of [1, 2, 3] as const) {
     for (const cardID of [...state.decks[tier], ...state.market[tier]]) {
-      requireCard(cardID);
+      if (cardID !== null) requireCard(cardID);
     }
   }
   for (const nobleID of state.availableNobleIds) {

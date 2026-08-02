@@ -67,7 +67,10 @@ test('accounts, private/public rooms, multiplayer, reconnect, localization, avat
   await expect(alice.locator('.game-shell')).toBeVisible({ timeout: 15_000 });
   await expect(bob.locator('.game-shell')).toBeVisible({ timeout: 15_000 });
 
-  const aliceTurn = await alice.getByText('Your turn', { exact: true }).isVisible();
+  const aliceTurn = await alice
+    .getByRole('banner')
+    .getByText('Your turn', { exact: true })
+    .isVisible();
   const actor = aliceTurn ? alice : bob;
   const observer = aliceTurn ? bob : alice;
   const tokenButtons = actor.locator('.take-token-grid button');

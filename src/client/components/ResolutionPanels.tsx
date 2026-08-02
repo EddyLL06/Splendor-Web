@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -7,7 +7,6 @@ import {
 } from '../../shared/constants/colors.js';
 import {
   applyDiscard,
-  suggestedDiscard,
 } from '../../shared/rules/engine.js';
 import { requireNoble } from '../../shared/data/gameData.js';
 import type {
@@ -22,6 +21,9 @@ interface DiscardPanelProps {
   playerID: PlayerID;
   currentPlayerID: PlayerID;
   onConfirm: (tokens: TokenCounts) => void;
+  returned: TokenCounts;
+  onReturnedChange: (tokens: TokenCounts) => void;
+  onHide: () => void;
 }
 
 export function DiscardPanel({
@@ -29,14 +31,15 @@ export function DiscardPanel({
   playerID,
   currentPlayerID,
   onConfirm,
+  returned,
+  onReturnedChange,
+  onHide,
 }: DiscardPanelProps) {
   const { t } = useTranslation();
-  const [returned, setReturned] = useState(() =>
-    suggestedDiscard(state, playerID),
-  );
+  const hideButtonRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    setReturned(suggestedDiscard(state, playerID));
-  }, [playerID, state]);
+    hideButtonRef.current?.focus();
+  }, []);
   const validation = applyDiscard(
     state,
     playerID,
@@ -50,16 +53,16 @@ export function DiscardPanel({
   );
 
   const adjust = (color: (typeof TOKEN_COLORS)[number], delta: number) => {
-    setReturned((current) => ({
-      ...current,
+    onReturnedChange({
+      ...returned,
       [color]: Math.max(
         0,
         Math.min(
           state.players[playerID].tokens[color],
-          current[color] + delta,
+          returned[color] + delta,
         ),
       ),
-    }));
+    });
   };
 
   return (
@@ -70,8 +73,20 @@ export function DiscardPanel({
         aria-modal="true"
         aria-labelledby="discard-title"
       >
-        <span className="eyebrow">{t('game.mandatory')}</span>
-        <h2 id="discard-title">{t('game.returnExactly', { count: required })}</h2>
+        <div className="modal-heading">
+          <div>
+            <span className="eyebrow">{t('game.mandatory')}</span>
+            <h2 id="discard-title">{t('game.returnExactly', { count: required })}</h2>
+          </div>
+          <button
+            ref={hideButtonRef}
+            type="button"
+            className="button button-ghost button-small"
+            onClick={onHide}
+          >
+            {t('game.viewTable')}
+          </button>
+        </div>
         <p className="modal-copy">{t('game.returnHelp')}</p>
         <div className="discard-grid">
           {TOKEN_COLORS.map((color) => (
