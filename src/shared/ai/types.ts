@@ -37,7 +37,7 @@ export interface SearchBudget {
 export interface BotDecision {
   move: BotMove;
   modelVersion: string;
-  policy: AgentPolicyID;
+  policy: AgentPolicyID | 'easy-v1';
   seed: string;
   nodesVisited: number;
   elapsedMs: number;

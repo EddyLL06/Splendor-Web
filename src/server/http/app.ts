@@ -28,6 +28,9 @@ import { MemoryMatchStore } from '../multiplayer/memory-store.js';
 import { GameAccessTicketService } from '../multiplayer/access-tickets.js';
 import { AuthenticatedSocketIO } from '../multiplayer/authenticated-socketio.js';
 import { RoomRegistry } from '../multiplayer/room-registry.js';
+import { BotTicketService } from '../ai/bot-ticket.js';
+import { BotCoordinator } from '../ai/bot-coordinator.js';
+import { isBotSeatMetadata } from '../ai/bot-seat.js';
 import { AvatarService, avatarLimits } from '../profile/avatar.js';
 import { RateLimiter } from '../security/rate-limiter.js';
 import { cleanupTemporaryUploads, prepareStorage } from '../storage/paths.js';
@@ -139,6 +142,7 @@ export interface GemCouncilApplication {
   lobby: LobbyService;
   rooms: RoomRegistry;
   accessTickets: GameAccessTicketService;
+  botCoordinator: BotCoordinator;
   socketTransport: AuthenticatedSocketIO;
   start: () => Promise<{ appServer: HttpServer; apiServer?: HttpServer }>;
   stop: () => Promise<void>;
@@ -169,12 +173,14 @@ export const createGemCouncilApplication = async (
   });
   const avatars = new AvatarService(database.prisma, config);
   const seatCredentials = new SeatCredentialService(database.prisma, config);
+  const botCredentials = new BotTicketService(config);
   const accessTickets = new GameAccessTicketService(database.prisma, config);
   const matchStore = new MemoryMatchStore();
   const rooms = new RoomRegistry();
   const lobby = new LobbyService({
     db: matchStore,
     credentials: seatCredentials,
+    botCredentials,
     rooms,
     accessTickets,
   });
@@ -182,6 +188,16 @@ export const createGemCouncilApplication = async (
     db: matchStore,
     rooms,
     tickets: accessTickets,
+  });
+  const botCoordinator = new BotCoordinator({
+    db: matchStore,
+    rooms,
+    tickets: accessTickets,
+    config,
+  });
+  rooms.setDeletionHandler((matchID) => {
+    socketTransport.disconnectMatch(matchID);
+    botCoordinator.stopMatch(matchID);
   });
   const boardgame = BoardgameServer({
     games: [SplendorGame],
@@ -192,7 +208,18 @@ export const createGemCouncilApplication = async (
     generateCredentials: () => {
       throw new Error('Built-in lobby credential issuance is disabled.');
     },
-    authenticateCredentials: seatCredentials.authenticate,
+    authenticateCredentials: (
+      credentials: string | undefined,
+      playerMetadata: Parameters<typeof seatCredentials.authenticate>[1],
+    ) => {
+      if (isBotSeatMetadata(playerMetadata?.data)) {
+        return botCredentials.authenticateBotCredential(
+          credentials,
+          playerMetadata?.data,
+        );
+      }
+      return seatCredentials.authenticate(credentials, playerMetadata);
+    },
   });
   const app = boardgame.app;
   app.proxy = true;
@@ -503,7 +530,13 @@ export const createGemCouncilApplication = async (
         return;
       }
       if (ctx.method === 'POST' && action === 'start') {
-        ctx.body = await lobby.start(authenticated, matchID);
+        const started = await lobby.start(authenticated, matchID);
+        void botCoordinator.startMatch(matchID).catch((error: unknown) => {
+          if (config.nodeEnv !== 'production') {
+            console.error('Bot coordinator failed to start match:', error);
+          }
+        });
+        ctx.body = started;
         return;
       }
       if (ctx.method === 'POST' && action === 'roles/spectator') {
@@ -560,6 +593,39 @@ export const createGemCouncilApplication = async (
       }
     }
 
+    const botSeatRoute = routeMatch(
+      ctx.path,
+      /^\/api\/matches\/([^/]+)\/bots(?:\/([^/]+))?$/,
+    );
+    if (botSeatRoute) {
+      const authenticated = requireProtectedMutation();
+      const matchID = decodePathSegment(botSeatRoute[1]);
+      const playerID = botSeatRoute[2]
+        ? decodePathSegment(botSeatRoute[2])
+        : undefined;
+      if (ctx.method === 'POST' && !playerID) {
+        ctx.body = await lobby.addBot(
+          authenticated,
+          matchID,
+          await parseJsonBody(),
+        );
+        return;
+      }
+      if (ctx.method === 'PATCH' && playerID) {
+        ctx.body = await lobby.updateBot(
+          authenticated,
+          matchID,
+          playerID,
+          await parseJsonBody(),
+        );
+        return;
+      }
+      if (ctx.method === 'DELETE' && playerID) {
+        ctx.body = await lobby.removeBot(authenticated, matchID, playerID);
+        return;
+      }
+    }
+
     ctx.status = 404;
     ctx.body = { error: { code: 'INVALID_INPUT' } };
   });
@@ -577,6 +643,7 @@ export const createGemCouncilApplication = async (
     lobby,
     rooms,
     accessTickets,
+    botCoordinator,
     socketTransport,
     start: async () => {
       if (running) return running;

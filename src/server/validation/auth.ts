@@ -91,6 +91,13 @@ export const gameAccessSchema = z.discriminatedUnion('role', [
   z.object({ role: z.literal('spectator') }).strict(),
 ]);
 
+export const botSeatSchema = z
+  .object({
+    playerID: z.string().regex(/^[0-3]$/),
+    difficulty: z.enum(['easy', 'normal', 'hard', 'expert']),
+  })
+  .strict();
+
 export const parseBody = <T>(schema: z.ZodType<T>, body: unknown): T => {
   const parsed = schema.safeParse(body);
   if (!parsed.success) throw invalidInput();

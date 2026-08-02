@@ -16,7 +16,8 @@ export interface SpectatorMembership {
 }
 
 export interface PlayerPresence {
-  userId: string;
+  userId?: string;
+  botId?: string;
   playerID: string;
   connections: Set<string>;
   disconnectedAt: number | null;
@@ -122,7 +123,7 @@ export class RoomRegistry {
 
   start(
     matchID: string,
-    players: Array<{ userId: string; playerID: string }>,
+    players: Array<{ userId?: string; botId?: string; playerID: string }>,
   ): number {
     const room = this.require(matchID);
     if (room.startedAt !== null) throw new ApiError(409, 'MATCH_ALREADY_STARTED');
@@ -134,10 +135,28 @@ export class RoomRegistry {
         connections: new Set(),
         disconnectedAt: room.startedAt,
       };
+      if (player.botId) presence.disconnectedAt = null;
       room.players.set(player.playerID, presence);
-      this.schedulePlayerExpiration(room, presence);
+      if (!player.botId) this.schedulePlayerExpiration(room, presence);
     }
     return room.startedAt;
+  }
+
+  connectBotPlayer(
+    matchID: string,
+    botId: string,
+    playerID: string,
+    socketID: string,
+  ): void {
+    const room = this.require(matchID);
+    const player = room.players.get(playerID);
+    if (!player || player.botId !== botId) {
+      throw new ApiError(403, 'GAME_ACCESS_INVALID');
+    }
+    if (player.expirationTimer) clearTimeout(player.expirationTimer);
+    player.expirationTimer = undefined;
+    player.disconnectedAt = null;
+    player.connections.add(socketID);
   }
 
   connectPlayer(
@@ -162,6 +181,7 @@ export class RoomRegistry {
     const player = room?.players.get(playerID);
     if (!room || !player) return;
     player.connections.delete(socketID);
+    if (player.botId) return;
     if (player.connections.size === 0 && player.disconnectedAt === null) {
       player.disconnectedAt = this.now();
       this.schedulePlayerExpiration(room, player);
@@ -175,6 +195,7 @@ export class RoomRegistry {
     const room = this.require(matchID);
     const player = room.players.get(playerID);
     if (player?.connections.size) return 'online';
+    if (player?.botId) return 'offline';
     const disconnectedAt = player?.disconnectedAt ?? room.startedAt ?? this.now();
     return disconnectedAt + PLAYER_CONNECTION_TOLERANCE_MS > this.now()
       ? 'reconnecting'
@@ -186,6 +207,7 @@ export class RoomRegistry {
     const player = room?.players.get(playerID);
     return Boolean(
       player &&
+        !player.botId &&
         player.connections.size === 0 &&
         player.disconnectedAt !== null &&
         player.disconnectedAt + PLAYER_ABANDON_TIMEOUT_MS <= this.now(),
@@ -326,6 +348,7 @@ export class RoomRegistry {
   }
 
   private schedulePlayerExpiration(room: MatchRoom, player: PlayerPresence): void {
+    if (player.botId) return;
     if (player.expirationTimer) clearTimeout(player.expirationTimer);
     if (player.disconnectedAt === null) return;
     const delay = Math.max(
@@ -337,9 +360,13 @@ export class RoomRegistry {
       void this.playerExpirationHandler(
         room.matchID,
         player.playerID,
-        player.userId,
+        player.userId ?? '',
       );
     }, delay);
     player.expirationTimer.unref?.();
+  }
+
+  isBotSeat(matchID: string, playerID: string): boolean {
+    return this.rooms.get(matchID)?.players.get(playerID)?.botId !== undefined;
   }
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { RoomMatch } from '../../shared/types/room.js';
+import type { BotDifficulty } from '../../shared/ai/types.js';
 import { jsonRequest, localizedError, useAuth } from '../auth.js';
 import { AccountMenu } from '../components/AccountMenu.js';
 import { SpectatorPopover } from '../components/SpectatorPopover.js';
@@ -32,6 +33,7 @@ export function WaitingRoom({
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
+  const [botDifficulty, setBotDifficulty] = useState<BotDifficulty>('easy');
   const enteringRef = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -130,6 +132,60 @@ export function WaitingRoom({
     }
   };
 
+  const addBot = async (playerID: string) => {
+    if (!match) return;
+    setBusy(`add-${playerID}`);
+    setError('');
+    try {
+      await request(
+        `/api/matches/${encodeURIComponent(session.matchID)}/bots`,
+        jsonRequest({ playerID, difficulty: botDifficulty }),
+      );
+      await refresh();
+    } catch (caught) {
+      setError(localizedError(caught));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const updateBot = async (playerID: string, difficulty: BotDifficulty) => {
+    if (!match) return;
+    setBusy(`update-${playerID}`);
+    setError('');
+    try {
+      await request(
+        `/api/matches/${encodeURIComponent(session.matchID)}/bots/${playerID}`,
+        {
+          ...jsonRequest({ playerID, difficulty }),
+          method: 'PATCH',
+        },
+      );
+      await refresh();
+    } catch (caught) {
+      setError(localizedError(caught));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const removeBot = async (playerID: string) => {
+    if (!match) return;
+    setBusy(`remove-${playerID}`);
+    setError('');
+    try {
+      await request(
+        `/api/matches/${encodeURIComponent(session.matchID)}/bots/${playerID}`,
+        { method: 'DELETE' },
+      );
+      await refresh();
+    } catch (caught) {
+      setError(localizedError(caught));
+    } finally {
+      setBusy('');
+    }
+  };
+
   const switchRole = async () => {
     setBusy('role');
     setError('');
@@ -187,7 +243,60 @@ export function WaitingRoom({
             return <div className={`seat-row${player.name ? ' seat-filled' : ''}`} key={player.id}>
               {avatarUrl ? <img className="seat-avatar" src={avatarUrl} alt="" /> : <span className="seat-number">{Number(player.id) + 1}</span>}
               <div><strong>{player.name || t('waiting.openSeat')}</strong><span>{player.data?.isViewer ? t('common.you') : player.name ? t('common.ready') : t('waiting.waitingPlayer')}</span></div>
-              <div className="seat-labels">{player.data?.isHost && <span className="host-badge compact-host">{t('waiting.host')}</span>}<span className="seat-status">{player.name ? '✓' : '…'}</span></div>
+              <div className="seat-labels">
+                {player.kind === 'bot' && (
+                  <span className="host-badge compact-host">
+                    {t('waiting.botBadge')} · {t(`waiting.bot${player.difficulty === 'easy' ? 'Easy' : player.difficulty === 'normal' ? 'Normal' : player.difficulty === 'hard' ? 'Hard' : 'Expert'}`)}
+                  </span>
+                )}
+                {player.data?.isHost && <span className="host-badge compact-host">{t('waiting.host')}</span>}
+                <span className="seat-status">{player.name ? '✓' : '…'}</span>
+              </div>
+              {player.kind === 'bot' && isHost && !isStarted ? (
+                <div className="bot-controls">
+                  <select
+                    value={player.difficulty}
+                    disabled={busy !== ''}
+                    onChange={(event) => void updateBot(String(player.id), event.target.value as BotDifficulty)}
+                    aria-label={t('waiting.botBadge')}
+                  >
+                    <option value="easy">{t('waiting.botEasy')}</option>
+                    <option value="normal">{t('waiting.botNormal')}</option>
+                    <option value="hard">{t('waiting.botHard')}</option>
+                    <option value="expert">{t('waiting.botExpert')}</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="button button-ghost button-small"
+                    disabled={busy !== ''}
+                    onClick={() => void removeBot(String(player.id))}
+                  >
+                    {t('waiting.removeBot')}
+                  </button>
+                </div>
+              ) : !player.name && isHost && !isStarted ? (
+                <div className="bot-controls">
+                  <select
+                    value={botDifficulty}
+                    disabled={busy !== ''}
+                    onChange={(event) => setBotDifficulty(event.target.value as BotDifficulty)}
+                    aria-label={t('waiting.botBadge')}
+                  >
+                    <option value="easy">{t('waiting.botEasy')}</option>
+                    <option value="normal">{t('waiting.botNormal')}</option>
+                    <option value="hard">{t('waiting.botHard')}</option>
+                    <option value="expert">{t('waiting.botExpert')}</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="button button-ghost button-small"
+                    disabled={busy !== ''}
+                    onClick={() => void addBot(String(player.id))}
+                  >
+                    {t('waiting.addBot')}
+                  </button>
+                </div>
+              ) : null}
             </div>;
           })}
         </div>
