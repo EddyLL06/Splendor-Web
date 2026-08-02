@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
 import { localizedError, useAuth, type AuthUser } from '../auth.js';
@@ -8,13 +9,63 @@ import {
 } from '../gameUiState.js';
 import { LanguageSwitcher } from './LanguageSwitcher.js';
 
-function ProfileModal({ onClose }: { onClose: () => void }) {
+function ProfileModal({
+  onClose,
+  returnFocus,
+}: {
+  onClose: () => void;
+  returnFocus: RefObject<HTMLButtonElement | null>;
+}) {
   const { t } = useTranslation();
   const { user, request, setUser } = useAuth();
   const [username, setUsername] = useState(user?.username ?? '');
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const dialogRef = useRef<HTMLElement>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const appRoot = document.getElementById('root');
+    const wasInert = appRoot?.inert ?? false;
+    const previousOverflow = document.body.style.overflow;
+    if (appRoot) appRoot.inert = true;
+    document.body.style.overflow = 'hidden';
+    const focusFrame = window.requestAnimationFrame(() => usernameRef.current?.focus());
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])',
+      ) ?? [])];
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      if (appRoot) appRoot.inert = wasInert;
+      window.requestAnimationFrame(() => returnFocus.current?.focus());
+    };
+  }, [onClose, returnFocus]);
+
   if (!user) return null;
 
   const saveUsername = async () => {
@@ -75,9 +126,15 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  return (
-    <div className="modal-backdrop">
-      <section className="modal profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
+  if (typeof document === 'undefined') return null;
+  return createPortal(
+    <div
+      className="modal-backdrop profile-modal-layer"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section ref={dialogRef} className="modal profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title">
         <div className="modal-heading">
           <div>
             <span className="eyebrow">{t('account.profile')}</span>
@@ -111,7 +168,7 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
         </div>
         <label className="field">
           <span>{t('account.username')}</span>
-          <input value={username} maxLength={20} autoComplete="nickname" onChange={(event) => setUsername(event.target.value)} />
+          <input ref={usernameRef} value={username} maxLength={20} autoComplete="nickname" onChange={(event) => setUsername(event.target.value)} />
         </label>
         <label className="field">
           <span>{t('account.email')}</span>
@@ -126,7 +183,8 @@ function ProfileModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -136,6 +194,8 @@ export function AccountMenu() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [turnSound, setTurnSound] = useState(readTurnSoundPreference);
+  const identityButtonRef = useRef<HTMLButtonElement>(null);
+  const closeProfile = useCallback(() => setProfileOpen(false), []);
   if (!user) return <LanguageSwitcher />;
   return (
     <>
@@ -153,7 +213,7 @@ export function AccountMenu() {
           />
           <span>{t('account.turnSound')}</span>
         </label>
-        <button type="button" className="account-identity" onClick={() => setProfileOpen(true)}>
+        <button ref={identityButtonRef} type="button" className="account-identity" onClick={() => setProfileOpen(true)}>
           <img src={user.avatarUrl} alt="" />
           <span>{user.username}</span>
         </button>
@@ -169,7 +229,7 @@ export function AccountMenu() {
           {signingOut ? t('account.signingOut') : t('account.signOut')}
         </button>
       </div>
-      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
+      {profileOpen && <ProfileModal onClose={closeProfile} returnFocus={identityButtonRef} />}
     </>
   );
 }

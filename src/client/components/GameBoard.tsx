@@ -35,6 +35,7 @@ import type {
 import { localizedError } from '../auth.js';
 import {
   canShowReservedCardDetails,
+  detectActionAnimation,
   formatActionLog,
   playTurnSound,
   readTurnSoundPreference,
@@ -80,6 +81,7 @@ interface CardFlight {
   id: string;
   kind: 'outgoing' | 'replacement' | 'generic';
   label: string;
+  card?: DevelopmentCard;
   from: RectSnapshot;
   to: RectSnapshot;
   delay: number;
@@ -116,8 +118,12 @@ const flightStyle = (flight: CardFlight): CSSProperties =>
     height: flight.from.height,
     '--flight-x': `${flight.to.left - flight.from.left}px`,
     '--flight-y': `${flight.to.top - flight.from.top}px`,
-    '--flight-width': `${Math.max(50, flight.to.width * 0.38)}px`,
-    '--flight-height': `${Math.max(70, flight.to.height * 0.62)}px`,
+    '--flight-width': `${flight.kind === 'replacement'
+      ? flight.to.width
+      : Math.max(52, Math.min(flight.from.width * 0.46, flight.to.width * 0.42))}px`,
+    '--flight-height': `${flight.kind === 'replacement'
+      ? flight.to.height
+      : Math.max(68, Math.min(flight.from.height * 0.54, flight.to.height * 0.72))}px`,
     '--flight-delay': `${flight.delay}ms`,
   }) as CSSProperties;
 
@@ -138,16 +144,17 @@ function ReservedCardSummary({
   const visible = canShowReservedCardDetails(reserved.cardId);
   const card = visible && reserved.cardId ? requireCard(reserved.cardId) : null;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     const updatePosition = () => {
       const rect = triggerRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const width = Math.min(260, window.innerWidth - 24);
-      const popoverHeight = 150;
-      const above = rect.top - popoverHeight - 10;
+      const previewRect = popoverRef.current?.getBoundingClientRect();
+      const width = previewRect?.width ?? Math.min(244, window.innerWidth - 24);
+      const previewHeight = previewRect?.height ?? 132;
+      const above = rect.top - previewHeight - 10;
       setPosition({
-        top: above >= 8 ? above : Math.min(window.innerHeight - popoverHeight - 8, rect.bottom + 8),
+        top: above >= 8 ? above : Math.min(window.innerHeight - previewHeight - 8, rect.bottom + 8),
         left: Math.max(8, Math.min(window.innerWidth - width - 8, rect.left + rect.width / 2 - width / 2)),
       });
     };
@@ -163,12 +170,13 @@ function ReservedCardSummary({
         setOpen(false);
       }
     };
-    updatePosition();
+    const frame = window.requestAnimationFrame(updatePosition);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('pointerdown', onPointerDown);
     return () => {
+      window.cancelAnimationFrame(frame);
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
       document.removeEventListener('keydown', onKeyDown);
@@ -187,23 +195,13 @@ function ReservedCardSummary({
   const popover = open && typeof document !== 'undefined'
     ? createPortal(
         <div
+          id={`reserved-preview-${ownerID}-${index}`}
           ref={popoverRef}
-          className="reserved-popover"
+          className="reserved-card-preview"
           role="tooltip"
           style={position}
         >
-          <div className="reserved-popover-heading">
-            <strong>{card.id}</strong>
-            <span>{t('game.standingPrestige', { count: card.points })}</span>
-          </div>
-          <div className="reserved-popover-cost">
-            {NORMAL_COLORS.map((color) => (
-              <TokenBadge key={color} color={color} count={card.cost[color]} compact />
-            ))}
-          </div>
-          <span className="reserved-popover-note">
-            {t('game.reservedDetail', { tier: card.tier, bonus: t(`colors.${card.bonus}`) })}
-          </span>
+          <DevelopmentCardView card={card} variant="preview" />
         </div>,
         document.body,
       )
@@ -215,9 +213,9 @@ function ReservedCardSummary({
         ref={triggerRef}
         type="button"
         className="reserved-summary"
-        aria-describedby={open ? `reserved-popover-${ownerID}-${index}` : undefined}
+        aria-describedby={open ? `reserved-preview-${ownerID}-${index}` : undefined}
         aria-expanded={open}
-        data-animation-key={`reserved-${ownerID}-${card.id}`}
+        data-animation-key={`reserved-summary-${ownerID}-${card.id}`}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
         onFocus={() => setOpen(true)}
@@ -230,11 +228,6 @@ function ReservedCardSummary({
       >
         {card.id}
       </button>
-      {popover && (
-        <span id={`reserved-popover-${ownerID}-${index}`} className="sr-only">
-          {t('game.reservedAccessibleDetail', { id: card.id, points: card.points })}
-        </span>
-      )}
       {popover}
     </>
   );
@@ -587,10 +580,16 @@ function GameOverPanel({
   );
 }
 
-const animationOriginKey = (animation: ActionAnimation): string => {
-  if (animation.type === 'market-card') return `market-${animation.tier}-${animation.slotIndex}`;
-  if (animation.type === 'reserve-deck') return `deck-${animation.tier}`;
-  return `reserved-${animation.playerID}-${animation.cardId}`;
+const animationOriginKeys = (animation: ActionAnimation): string[] => {
+  if (animation.type === 'market-card') {
+    return [`market-${animation.tier}-${animation.slotIndex}`];
+  }
+  if (animation.type === 'reserve-deck') return [`deck-${animation.tier}`];
+  return [
+    `reserved-detail-${animation.playerID}-${animation.cardId}`,
+    `reserved-summary-${animation.playerID}-${animation.cardId}`,
+    `player-${animation.playerID}`,
+  ];
 };
 
 export function GameBoard(props: GameBoardProps) {
@@ -633,10 +632,10 @@ export function GameBoard(props: GameBoardProps) {
   const discardKeyRef = useRef<string | null>(null);
   const resumeDiscardRef = useRef<HTMLButtonElement>(null);
   const previousRectsRef = useRef<Map<string, RectSnapshot>>(new Map());
+  const pendingOriginRectsRef = useRef<Map<string, RectSnapshot> | null>(null);
   const processedLogIDRef = useRef<number | null>(null);
   const animationTimerRef = useRef<number | null>(null);
   const submitTimerRef = useRef<number | null>(null);
-  const latestLogID = G.actionLog.at(-1)?.id ?? 0;
 
   useEffect(() => {
     const previous = previousTurnRef.current;
@@ -690,27 +689,36 @@ export function GameBoard(props: GameBoardProps) {
 
   useLayoutEffect(() => {
     const currentRects = collectAnimationRects();
+    const latestLogID = G.actionLog.at(-1)?.id ?? 0;
     if (processedLogIDRef.current === null) {
       processedLogIDRef.current = latestLogID;
       previousRectsRef.current = currentRects;
       return;
     }
-    if (latestLogID <= processedLogIDRef.current) {
+    const detected = detectActionAnimation(G.actionLog, processedLogIDRef.current);
+    if (detected.processedThrough === processedLogIDRef.current) {
       previousRectsRef.current = currentRects;
       return;
     }
-    const newEntries = G.actionLog.filter((entry) => entry.id > (processedLogIDRef.current ?? 0));
-    processedLogIDRef.current = latestLogID;
-    const entry = [...newEntries].reverse().find((candidate) => candidate.animation);
+    processedLogIDRef.current = detected.processedThrough;
+    const entry = detected.entry;
     const animation = entry?.animation;
     if (!animation || !entry) {
+      pendingOriginRectsRef.current = null;
       previousRectsRef.current = currentRects;
       return;
     }
+    const originRects = pendingOriginRectsRef.current ?? previousRectsRef.current;
+    pendingOriginRectsRef.current = null;
     const destination = currentRects.get(`player-${animation.playerID}`);
-    const origin = previousRectsRef.current.get(animationOriginKey(animation)) ?? destination;
+    const origin = animationOriginKeys(animation)
+      .map((key) => originRects.get(key))
+      .find((rect): rect is RectSnapshot => rect !== undefined) ?? destination;
     const nextFlights: CardFlight[] = [];
     if (origin && destination) {
+      const card = animation.type === 'reserve-deck'
+        ? undefined
+        : requireCard(animation.cardId);
       nextFlights.push({
         id: `${entry.id}-out`,
         kind: animation.type === 'reserve-deck' ? 'generic' : 'outgoing',
@@ -719,22 +727,25 @@ export function GameBoard(props: GameBoardProps) {
           : animation.type === 'reserved-purchase'
             ? animation.cardId
             : t('game.hiddenCardFace'),
+        card,
         from: origin,
         to: destination,
         delay: 0,
       });
     }
     if (animation.type === 'market-card' && animation.replacementCardId) {
-      const deck = currentRects.get(`deck-${animation.tier}`);
+      const deck = currentRects.get(`deck-${animation.tier}`)
+        ?? originRects.get(`deck-${animation.tier}`);
       const slot = currentRects.get(`market-${animation.tier}-${animation.slotIndex}`);
       if (deck && slot) {
         nextFlights.push({
           id: `${entry.id}-replacement`,
           kind: 'replacement',
           label: animation.replacementCardId,
+          card: requireCard(animation.replacementCardId),
           from: deck,
           to: slot,
-          delay: 350,
+          delay: 360,
         });
         setReplacingSlot(`${animation.tier}-${animation.slotIndex}`);
       }
@@ -744,12 +755,13 @@ export function GameBoard(props: GameBoardProps) {
     animationTimerRef.current = window.setTimeout(() => {
       setFlights([]);
       setReplacingSlot(null);
-    }, 700);
+    }, 900);
     previousRectsRef.current = currentRects;
-  }, [G.actionLog, latestLogID, t]);
+  }, [G.actionLog, t]);
 
   const sendMainAction = (action: MainAction) => {
     if (!canTakeMainAction || isSubmitting) return;
+    pendingOriginRectsRef.current = collectAnimationRects();
     setIsSubmitting(true);
     setActionMode(null);
     moveAPI.mainAction(action);
@@ -768,6 +780,25 @@ export function GameBoard(props: GameBoardProps) {
     : actionMode === 'reserve'
       ? t('game.reserveModeGuidance')
       : t('game.actionModeGuidance');
+
+  const flightLayer = flights.length > 0 && typeof document !== 'undefined'
+    ? createPortal(
+        <div className="card-flight-layer" aria-hidden="true">
+          {flights.map((flight) => (
+            <div
+              key={flight.id}
+              className={`card-flight flight-${flight.kind}`}
+              style={flightStyle(flight)}
+            >
+              {flight.card
+                ? <DevelopmentCardView card={flight.card} variant="flight" />
+                : <span className="card-back-label">{flight.label}</span>}
+            </div>
+          ))}
+        </div>,
+        document.body,
+      )
+    : null;
 
   return (
     <div className={`game-shell${isLocalTurn && !G.result ? ' local-turn-active' : ''}`}>
@@ -818,48 +849,7 @@ export function GameBoard(props: GameBoardProps) {
 
       <main className="game-workspace">
         <section className="upper-play-area">
-          <div className="table-column">
-            <section className="nobles-panel">
-              <div className="section-heading compact-heading">
-                <div>
-                  <span className="eyebrow">{t('game.visits')}</span>
-                  <h2>{t('game.availableNobles')}</h2>
-                </div>
-                <span className="subtle-note">{t('game.oneNoble')}</span>
-              </div>
-              <div className="nobles-row">
-                {G.availableNobleIds.map((nobleID) => <NobleTile key={nobleID} nobleID={nobleID} />)}
-                {G.availableNobleIds.length === 0 && <p className="empty-copy">{t('game.noNobles')}</p>}
-              </div>
-            </section>
-            <div className="markets">
-              {([3, 2, 1] as const).map((tier) => (
-                <MarketTier
-                  key={tier}
-                  tier={tier}
-                  state={G}
-                  playerID={localID}
-                  mode={actionMode}
-                  interactive={canTakeMainAction && !isSubmitting}
-                  replacingSlot={replacingSlot}
-                  onBuy={(card, location) => setPurchaseTarget({ card, location })}
-                  onReserve={(selectedTier, cardID) => sendMainAction({ type: 'reserveMarket', tier: selectedTier, cardId: cardID })}
-                  onBlindReserve={(selectedTier) => sendMainAction({ type: 'reserveDeck', tier: selectedTier })}
-                />
-              ))}
-            </div>
-          </div>
-
-          <aside className="actions-column">
-            <TokenTakePanel
-              state={G}
-              playerID={localID}
-              currentPlayerID={ctx.currentPlayer}
-              enabled={canTakeMainAction && !isSubmitting && actionMode === null}
-              blockedGuidance={actionMode ? modeGuidance : undefined}
-              resetKey={actionMode ?? 'none'}
-              onAction={sendMainAction}
-            />
+          <aside className="reserved-column">
             <section className="action-card reserved-section">
               <div className="section-heading compact-heading">
                 <div>
@@ -879,18 +869,61 @@ export function GameBoard(props: GameBoardProps) {
                       <DevelopmentCardView
                         key={card.id}
                         card={card}
+                        variant="reserved-detail"
                         mode={actionMode === 'buy' ? 'buy' : null}
                         selectable={canBuy}
-                        animationKey={`reserved-${localID}-${card.id}`}
+                        animationKey={`reserved-detail-${localID}-${card.id}`}
                         onSelect={() => setPurchaseTarget({ card, location: { source: 'reserved', cardId: card.id } })}
                       />
                     );
                   })}
                 </div>
               ) : (
-                <p className="empty-copy">{t('game.reserveHelp')}</p>
+                <p className="empty-copy reserved-empty-state">{t('game.reserveHelp')}</p>
               )}
             </section>
+          </aside>
+
+          <div className="table-column">
+            <section className="nobles-panel">
+              <div className="nobles-label">
+                <span className="eyebrow">{t('game.visits')}</span>
+                <h2>{t('game.availableNobles')}</h2>
+              </div>
+              <div className="nobles-row">
+                {G.availableNobleIds.map((nobleID) => <NobleTile key={nobleID} nobleID={nobleID} />)}
+                {G.availableNobleIds.length === 0 && <p className="empty-copy">{t('game.noNobles')}</p>}
+              </div>
+              <span className="subtle-note">{t('game.oneNoble')}</span>
+            </section>
+            <div className="markets">
+              {([3, 2, 1] as const).map((tier) => (
+                <MarketTier
+                  key={tier}
+                  tier={tier}
+                  state={G}
+                  playerID={localID}
+                  mode={actionMode}
+                  interactive={canTakeMainAction && !isSubmitting}
+                  replacingSlot={replacingSlot}
+                  onBuy={(card, location) => setPurchaseTarget({ card, location })}
+                  onReserve={(selectedTier, cardID) => sendMainAction({ type: 'reserveMarket', tier: selectedTier, cardId: cardID })}
+                  onBlindReserve={(selectedTier) => sendMainAction({ type: 'reserveDeck', tier: selectedTier })}
+                />
+              ))}
+            </div>
+          </div>
+
+          <aside className="actions-column right-column">
+            <TokenTakePanel
+              state={G}
+              playerID={localID}
+              currentPlayerID={ctx.currentPlayer}
+              enabled={canTakeMainAction && !isSubmitting && actionMode === null}
+              blockedGuidance={actionMode ? modeGuidance : undefined}
+              resetKey={actionMode ?? 'none'}
+              onAction={sendMainAction}
+            />
             <section className="action-card log-section">
               <div className="section-heading compact-heading">
                 <div>
@@ -958,16 +991,7 @@ export function GameBoard(props: GameBoardProps) {
         </section>
       </main>
 
-      {flights.map((flight) => (
-        <div
-          key={flight.id}
-          className={`card-flight flight-${flight.kind}`}
-          style={flightStyle(flight)}
-          aria-hidden="true"
-        >
-          <span>{flight.label}</span>
-        </div>
-      ))}
+      {flightLayer}
 
       {purchaseTarget && localID && (
         <PaymentPanel

@@ -5,6 +5,12 @@ import type { DevelopmentCard } from '../../shared/types/game.js';
 import type { CardActionMode } from '../gameUiState.js';
 import { TokenBadge } from './TokenBadge.js';
 
+export type DevelopmentCardVariant =
+  | 'market'
+  | 'reserved-detail'
+  | 'preview'
+  | 'flight';
+
 interface DevelopmentCardViewProps {
   card: DevelopmentCard;
   mode?: CardActionMode;
@@ -12,6 +18,7 @@ interface DevelopmentCardViewProps {
   onSelect?: () => void;
   animationKey?: string;
   replacing?: boolean;
+  variant?: DevelopmentCardVariant;
 }
 
 export function DevelopmentCardView({
@@ -21,9 +28,10 @@ export function DevelopmentCardView({
   onSelect,
   animationKey,
   replacing = false,
+  variant = 'market',
 }: DevelopmentCardViewProps) {
   const { t } = useTranslation();
-  const className = `development-card bonus-${card.bonus}${
+  const className = `development-card development-card-${variant} bonus-${card.bonus}${
     mode ? ` card-mode-${mode}` : ' card-informational'
   }${selectable ? ' card-selectable' : ''}${mode && !selectable ? ' card-unavailable' : ''}${
     replacing ? ' card-replacing' : ''
@@ -31,7 +39,10 @@ export function DevelopmentCardView({
   const content = (
     <>
       <div className="card-topline">
-        <span className="card-tier">{t('game.tier', { tier: card.tier })}</span>
+        <span className="card-identity">
+          <span className="card-tier">{t('game.tier', { tier: card.tier })}</span>
+          {variant !== 'market' && <strong className="card-id">{card.id}</strong>}
+        </span>
         <span className="card-points" aria-label={t('game.standingPrestige', { count: card.points })}>
           {card.points} <span aria-hidden="true">◆</span>
         </span>

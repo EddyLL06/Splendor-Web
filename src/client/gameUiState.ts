@@ -32,6 +32,25 @@ export const shouldNotifyLocalTurn = (
 export const canShowReservedCardDetails = (cardId: string | null): boolean =>
   cardId !== null;
 
+export interface ActionAnimationCursor {
+  processedThrough: number;
+  entry: ActionLogEntry | null;
+}
+
+export const detectActionAnimation = (
+  entries: ActionLogEntry[],
+  processedThrough: number,
+): ActionAnimationCursor => {
+  const latestID = entries.at(-1)?.id ?? processedThrough;
+  if (latestID <= processedThrough) {
+    return { processedThrough, entry: null };
+  }
+  const entry = [...entries]
+    .reverse()
+    .find((candidate) => candidate.id > processedThrough && candidate.animation);
+  return { processedThrough: latestID, entry: entry ?? null };
+};
+
 export interface DiscardUiState {
   hidden: boolean;
   returned: TokenCounts | null;
