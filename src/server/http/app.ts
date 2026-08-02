@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import type { Server as HttpServer } from 'node:http';
 import { unlink } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import type Koa from 'koa';
 import { koaBody, type ScalarOrArrayFiles } from 'koa-body';
@@ -31,6 +33,9 @@ import { RoomRegistry } from '../multiplayer/room-registry.js';
 import { BotTicketService } from '../ai/bot-ticket.js';
 import { BotCoordinator } from '../ai/bot-coordinator.js';
 import { isBotSeatMetadata } from '../ai/bot-seat.js';
+import { AiWorkerPool, workerEntryFor } from '../ai/worker-pool.js';
+import { HAND_TUNED_WEIGHTS } from '../../shared/ai/models/default.js';
+import { parseModel, weightsFromModel } from '../../shared/ai/models/schema.js';
 import { AvatarService, avatarLimits } from '../profile/avatar.js';
 import { RateLimiter } from '../security/rate-limiter.js';
 import { cleanupTemporaryUploads, prepareStorage } from '../storage/paths.js';
@@ -143,6 +148,7 @@ export interface GemCouncilApplication {
   rooms: RoomRegistry;
   accessTickets: GameAccessTicketService;
   botCoordinator: BotCoordinator;
+  aiPool: AiWorkerPool;
   socketTransport: AuthenticatedSocketIO;
   start: () => Promise<{ appServer: HttpServer; apiServer?: HttpServer }>;
   stop: () => Promise<void>;
@@ -194,7 +200,15 @@ export const createGemCouncilApplication = async (
     rooms,
     tickets: accessTickets,
     config,
+    weights: loadAiWeights(config.projectRoot),
   });
+  const aiPool = new AiWorkerPool({
+    workerCount: config.aiBotEnabled ? config.aiBotWorkers : 0,
+    entry: workerEntryFor(),
+    queueLimit: config.aiBotQueueLimit,
+    hardMaxMs: config.aiBotHardMaxMs,
+  });
+  botCoordinator.setPool(aiPool);
   rooms.setDeletionHandler((matchID) => {
     socketTransport.disconnectMatch(matchID);
     botCoordinator.stopMatch(matchID);
@@ -644,6 +658,7 @@ export const createGemCouncilApplication = async (
     rooms,
     accessTickets,
     botCoordinator,
+    aiPool,
     socketTransport,
     start: async () => {
       if (running) return running;
@@ -655,6 +670,7 @@ export const createGemCouncilApplication = async (
       return running;
     },
     stop: async () => {
+      aiPool.dispose();
       if (running) {
         boardgame.kill({
           appServer: running.appServer,
@@ -665,4 +681,17 @@ export const createGemCouncilApplication = async (
       await database.close();
     },
   };
+};
+
+const loadAiWeights = (projectRoot: string): Record<string, number> => {
+  try {
+    const raw = readFileSync(
+      join(projectRoot, 'ai_bot/models/heuristic-v1.json'),
+      'utf8',
+    );
+    const model = parseModel(JSON.parse(raw));
+    return { ...weightsFromModel(model) } as Record<string, number>;
+  } catch {
+    return { ...HAND_TUNED_WEIGHTS } as Record<string, number>;
+  }
 };

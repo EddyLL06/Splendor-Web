@@ -56,6 +56,9 @@ const main = async (): Promise<void> => {
     .split(',')
     .map((value) => Number(value.trim()));
   const modelPath = values.get('model');
+  const candidatePolicy = (values.get('policy') ?? 'normal-v1') as
+    | 'normal-v1'
+    | 'hard-v1';
   const baseline = values.get('baseline') ?? 'uniform-random-v1';
   const rotateSeats = values.get('rotate-seats') !== 'false';
   const output = resolve(
@@ -64,6 +67,9 @@ const main = async (): Promise<void> => {
   const maxActions = Number(values.get('max-actions') ?? '3000');
 
   if (!modelPath) throw new Error('--model is required.');
+  if (candidatePolicy !== 'normal-v1' && candidatePolicy !== 'hard-v1') {
+    throw new Error('--policy must be normal-v1 or hard-v1.');
+  }
   if (players.some((count) => ![2, 3, 4].includes(count))) {
     throw new Error('--players must be 2,3 and/or 4.');
   }
@@ -110,13 +116,16 @@ const main = async (): Promise<void> => {
     const gameIndexForCount = Math.floor(index / players.length);
     const rotate = rotateSeats ? gameIndexForCount % numPlayers : 0;
     const agentOrder = Array.from({ length: numPlayers }, (_, seat) =>
-      seat === rotate ? 'normal-v1' : baselineAgent,
+      seat === rotate ? candidatePolicy : baselineAgent,
     ) as AgentPolicyID[];
     const weightsByAgent: Partial<
       Record<AgentPolicyID, Record<string, number>>
-    > = { 'normal-v1': candidateWeights };
+    > = { [candidatePolicy]: candidateWeights };
     if (baselineAgent === 'normal-v1' && baselineWeights) {
       weightsByAgent[baselineAgent] = baselineWeights;
+    }
+    if (candidatePolicy === 'hard-v1' && baselineAgent === 'hard-v1') {
+      weightsByAgent[baselineAgent] = baselineWeights ?? candidateWeights;
     }
     results.push(
       runGame(index, numPlayers, agentOrder, `${seed}:bench`, maxActions, weightsByAgent),
@@ -131,18 +140,18 @@ const main = async (): Promise<void> => {
     [2, 3, 4].map((count) => {
       const subset = results.filter((game) => game.numPlayers === count);
       const candidateSeatGames = subset.filter(
-        (game) => Object.values(game.agents).includes('normal-v1'),
+        (game) => Object.values(game.agents).includes(candidatePolicy),
       );
       const wins = subset.filter((game) =>
         game.winners.some(
           (winner, _index, winners) =>
-            winners.length === 1 && game.agents[winner] === 'normal-v1',
+            winners.length === 1 && game.agents[winner] === candidatePolicy,
         ),
       ).length;
       const sharedWins = subset.filter(
         (game) =>
           game.winners.length > 1 &&
-          game.winners.some((winner) => game.agents[winner] === 'normal-v1'),
+          game.winners.some((winner) => game.agents[winner] === candidatePolicy),
       ).length;
       const avgRank =
         candidateSeatGames.length === 0
@@ -152,7 +161,7 @@ const main = async (): Promise<void> => {
                 sum +
                 game.standings.findIndex(
                   (standing) =>
-                    game.agents[standing.playerID] === 'normal-v1',
+                    game.agents[standing.playerID] === candidatePolicy,
                 ) +
                 1,
               0,
@@ -162,7 +171,7 @@ const main = async (): Promise<void> => {
         elapsedValuesMs: number[];
       }>(
         (acc, game) => {
-          const value = game.decisionStats['normal-v1'];
+          const value = game.decisionStats[candidatePolicy];
           acc.decisions += value.decisions;
           acc.elapsedValuesMs.push(...value.elapsedValuesMs);
           return acc;
@@ -174,7 +183,7 @@ const main = async (): Promise<void> => {
           const seatGames = subset.filter((game) => {
             const candidateSeat = Number(
               Object.keys(game.agents).find(
-                (playerID) => game.agents[playerID] === 'normal-v1',
+                (playerID) => game.agents[playerID] === candidatePolicy,
               ),
             );
             return candidateSeat === seat;
@@ -183,7 +192,7 @@ const main = async (): Promise<void> => {
             (game) =>
               game.winners.length === 1 &&
               game.winners.some(
-                (winner) => game.agents[winner] === 'normal-v1',
+                (winner) => game.agents[winner] === candidatePolicy,
               ),
           ).length;
           return [
@@ -239,6 +248,7 @@ const main = async (): Promise<void> => {
     games,
     players,
     candidate: candidateModel.modelVersion,
+    policy: candidatePolicy,
     baseline: baselineAgent === 'normal-v1' ? baseline : baselineAgent,
     rotateSeats,
     byPlayers,

@@ -19,6 +19,7 @@ export const AI_AGENTS = [
   'uniform-random-v1',
   'cheap-greedy-v1',
   'normal-v1',
+  'hard-v1',
 ] as const;
 export type AgentPolicyID = (typeof AI_AGENTS)[number];
 

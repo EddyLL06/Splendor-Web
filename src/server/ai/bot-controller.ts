@@ -18,14 +18,19 @@ import { SplendorGame } from '../../game/SplendorGame.js';
 import {
   NoLegalActionError,
   chooseEasyBotMove,
+  chooseBotMove,
 } from '../../shared/ai/policy.js';
+import { computeHardDecision } from '../../shared/ai/search/beam.js';
 import { createObservation } from '../../shared/ai/observation.js';
 import { createSeededRNG } from '../../shared/ai/seeded-rng.js';
 import type {
   BotDifficulty,
   BoardContextView,
+  BotDecision,
 } from '../../shared/ai/types.js';
+import type { AIObservation } from '../../shared/ai/observation.js';
 import type { SplendorState } from '../../shared/types/game.js';
+import type { AiWorkerPool } from './worker-pool.js';
 
 type GameClient = ReturnType<typeof Client<SplendorState>>;
 
@@ -41,6 +46,9 @@ export interface BotControllerOptions {
   thinkDelayMinMs?: number;
   thinkDelayMaxMs?: number;
   onError?: (error: unknown) => void;
+  pool?: AiWorkerPool;
+  weights: Record<string, number>;
+  hardMaxMs: number;
 }
 
 export class BotController {
@@ -132,9 +140,8 @@ export class BotController {
         playerID,
         ctx,
       );
-      const decision = chooseEasyBotMove(observation, ctx, {
-        seed: `${this.options.matchID}:${playerID}:${stateID}`,
-      });
+      const seed = `${this.options.matchID}:${playerID}:${stateID}`;
+      const decision = await this.computeDecision(observation, ctx, seed);
       if (this.stopped || generation !== this.generation) return;
       if (this.lastStateID !== stateID) return;
       const moveType = decision.move.move;
@@ -150,6 +157,58 @@ export class BotController {
       this.options.onError?.(caught);
     } finally {
       this.thinking = false;
+    }
+  }
+
+  private async computeDecision(
+    observation: AIObservation,
+    ctx: BoardContextView,
+    seed: string,
+  ): Promise<BotDecision> {
+    if (this.options.difficulty === 'easy') {
+      return chooseEasyBotMove(observation, ctx, { seed });
+    }
+    if (this.options.difficulty === 'normal') {
+      return chooseBotMove(observation, ctx, {
+        policy: 'normal-v1',
+        seed,
+        weights: this.options.weights,
+      });
+    }
+    const budget = {
+      deadlineEpochMs: performance.now() + this.options.hardMaxMs,
+      maxNodes: 800,
+      beamWidth: 5,
+      maxDeterminizations: 1,
+      maxSimulations: 0,
+    };
+    try {
+      if (this.options.pool) {
+        return await this.options.pool.requestHardDecision(
+          {
+            observation,
+            ctx,
+            seed,
+            weights: this.options.weights,
+            budget,
+          },
+          'live',
+        );
+      }
+      return computeHardDecision({
+        observation,
+        ctx,
+        seed,
+        weights: this.options.weights,
+        budget,
+      });
+    } catch {
+      const fallback = chooseBotMove(observation, ctx, {
+        policy: 'normal-v1',
+        seed,
+        weights: this.options.weights,
+      });
+      return { ...fallback, fallbackLevel: 2 as const };
     }
   }
 }

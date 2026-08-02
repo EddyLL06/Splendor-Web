@@ -11,6 +11,12 @@ import {
 } from './legal-actions.js';
 import { scoreCandidate } from './evaluate.js';
 import { evaluateWithWeights } from './evaluate.js';
+import { computeHardDecision } from './search/beam.js';
+import { chooseNormalMove } from './policy-normal.js';
+import {
+  IllegalCandidateError,
+  NoLegalActionError,
+} from './errors.js';
 import { determinize } from './hidden-information.js';
 import {
   assertObservationIntegrity,
@@ -35,25 +41,7 @@ import type {
 } from './types.js';
 
 export const AI_KERNEL_MODEL_VERSION = 'ai-kernel-v0.1.0';
-
-export class NoLegalActionError extends Error {
-  readonly playerID: string;
-  readonly stateID: number;
-
-  constructor(playerID: string, stateID: number) {
-    super('NO_LEGAL_ACTION');
-    this.name = 'NoLegalActionError';
-    this.playerID = playerID;
-    this.stateID = stateID;
-  }
-}
-
-export class IllegalCandidateError extends Error {
-  constructor(details: string) {
-    super(`AI produced an illegal action: ${details}`);
-    this.name = 'IllegalCandidateError';
-  }
-}
+export { IllegalCandidateError, NoLegalActionError } from './errors.js';
 
 const chooseUniformRandom = (
   candidates: AIActionCandidate[],
@@ -118,6 +106,7 @@ export const chooseBotMove = (
     policy: AgentPolicyID;
     seed: string;
     weights?: Record<string, number>;
+    budgetMs?: number;
   },
 ): BotDecision => {
   const startedAt = performance.now();
@@ -125,6 +114,23 @@ export const chooseBotMove = (
 
   const rng = createSeededRNG(`kernel:${options.seed}`);
   const fullState = determinize(observation, rng);
+  if (options.policy === 'hard-v1') {
+    const decision = computeHardDecision({
+      observation,
+      ctx,
+      seed: options.seed,
+      weights: options.weights ?? {},
+      budget: {
+        deadlineEpochMs: performance.now() + (options.budgetMs ?? 80),
+        maxNodes: 800,
+        beamWidth: 5,
+        maxDeterminizations: 1,
+        maxSimulations: 0,
+      },
+    });
+    validateMove(fullState, observation.playerID, ctx, decision);
+    return decision;
+  }
   const candidates = enumerateLegalActions(
     fullState,
     observation.playerID,
@@ -145,9 +151,8 @@ export const chooseBotMove = (
             ctx,
             options.seed,
           )
-        : chooseNormal(
+        : chooseNormalMove(
             fullState,
-            candidates,
             observation.playerID,
             ctx,
             options.seed,
@@ -166,42 +171,6 @@ export const chooseBotMove = (
   };
   validateMove(fullState, observation.playerID, ctx, decision);
   return decision;
-};
-
-const chooseNormal = (
-  state: SplendorState,
-  candidates: AIActionCandidate[],
-  playerID: string,
-  ctx: BoardContextView,
-  seed: string,
-  weights: Record<string, number> | undefined,
-): AIActionCandidate => {
-  const rng = createSeededRNG(`policy:${seed}`);
-  let bestScore = Number.NEGATIVE_INFINITY;
-  let best: AIActionCandidate[] = [];
-  for (const candidate of candidates) {
-    const [argument] = candidate.move.args;
-    const sim = createSimulation(
-      JSON.parse(JSON.stringify(state)) as SplendorState,
-      ctx,
-    );
-    const result =
-      candidate.move.move === 'mainAction'
-        ? applySimulationMainAction(sim, playerID, argument as MainAction)
-        : candidate.move.move === 'discardTokens'
-          ? applySimulationDiscard(sim, playerID, argument as TokenCounts)
-          : applySimulationNoble(sim, playerID, argument as string);
-    const score = result.ok
-      ? evaluateWithWeights(sim.G, playerID, weights ?? {})
-      : Number.NEGATIVE_INFINITY;
-    if (score > bestScore) {
-      bestScore = score;
-      best = [candidate];
-    } else if (score === bestScore) {
-      best.push(candidate);
-    }
-  }
-  return rng.choice(best);
 };
 
 /**

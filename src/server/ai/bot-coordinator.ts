@@ -9,11 +9,13 @@ import type { GameAccessTicketService } from '../multiplayer/access-tickets.js';
 import type { RoomRegistry } from '../multiplayer/room-registry.js';
 import type { BotSeatMetadata } from './bot-seat.js';
 import { BotController } from './bot-controller.js';
+import type { AiWorkerPool } from './worker-pool.js';
 
 const BOT_TICKET_TTL_MS = 12 * 60 * 60_000;
 
 export class BotCoordinator {
   private readonly controllers = new Map<string, BotController[]>();
+  private pool?: AiWorkerPool;
 
   constructor(
     private readonly dependencies: {
@@ -21,10 +23,16 @@ export class BotCoordinator {
       rooms: RoomRegistry;
       tickets: GameAccessTicketService;
       config: AppConfig;
+      weights: Record<string, number>;
     },
   ) {}
 
+  setPool(pool: AiWorkerPool): void {
+    this.pool = pool;
+  }
+
   async startMatch(matchID: string): Promise<void> {
+    if (!this.dependencies.config.aiBotEnabled) return;
     this.stopMatch(matchID);
     const room = this.dependencies.rooms.get(matchID);
     if (!room || room.startedAt === null) return;
@@ -53,6 +61,9 @@ export class BotCoordinator {
         accessTicket: ticket.accessTicket,
         credentials: player.credentials ?? '',
         serverURL: `http://127.0.0.1:${this.dependencies.config.port}`,
+        pool: this.pool,
+        weights: this.dependencies.weights,
+        hardMaxMs: this.dependencies.config.aiBotHardMaxMs,
         onError: (error) => {
           console.error(`[bot-controller] ${matchID}/${seatID}:`, error);
         },
