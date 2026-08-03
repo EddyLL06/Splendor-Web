@@ -34,8 +34,10 @@ import { BotTicketService } from '../ai/bot-ticket.js';
 import { BotCoordinator } from '../ai/bot-coordinator.js';
 import { isBotSeatMetadata } from '../ai/bot-seat.js';
 import { AiWorkerPool, workerEntryFor } from '../ai/worker-pool.js';
+import { AiMetrics } from '../ai/metrics.js';
 import { HAND_TUNED_WEIGHTS } from '../../shared/ai/models/default.js';
 import { parseModel, weightsFromModel } from '../../shared/ai/models/schema.js';
+import { rulesFingerprintOrNull } from '../../shared/ai/models/fingerprint.js';
 import { AvatarService, avatarLimits } from '../profile/avatar.js';
 import { RateLimiter } from '../security/rate-limiter.js';
 import { cleanupTemporaryUploads, prepareStorage } from '../storage/paths.js';
@@ -149,6 +151,7 @@ export interface GemCouncilApplication {
   accessTickets: GameAccessTicketService;
   botCoordinator: BotCoordinator;
   aiPool: AiWorkerPool;
+  aiMetrics: AiMetrics;
   socketTransport: AuthenticatedSocketIO;
   start: () => Promise<{ appServer: HttpServer; apiServer?: HttpServer }>;
   stop: () => Promise<void>;
@@ -199,18 +202,22 @@ export const createGemCouncilApplication = async (
   socketTransport.setRoomSnapshotProvider((access) =>
     lobby.roomSnapshotForAccess(access),
   );
+  const aiMetrics = new AiMetrics();
+  const aiModel = loadAiModel(config.projectRoot);
   const botCoordinator = new BotCoordinator({
     db: matchStore,
     rooms,
     tickets: accessTickets,
     config,
-    weights: loadAiWeights(config.projectRoot),
+    weights: aiModel.weights,
+    metrics: aiMetrics,
   });
   const aiPool = new AiWorkerPool({
     workerCount: config.aiBotEnabled ? config.aiBotWorkers : 0,
     entry: workerEntryFor(),
     queueLimit: config.aiBotQueueLimit,
     hardMaxMs: config.aiBotHardMaxMs,
+    metrics: aiMetrics,
   });
   botCoordinator.setPool(aiPool);
   rooms.setDeletionHandler((matchID) => {
@@ -459,6 +466,22 @@ export const createGemCouncilApplication = async (
       return;
     }
 
+    if (ctx.method === 'GET' && ctx.path === '/api/diagnostics/ai') {
+      requireSession(session);
+      ctx.body = {
+        enabled: config.aiBotEnabled,
+        workerCount: config.aiBotWorkers,
+        workersActive: aiPool.workersActive,
+        expertEnabled: config.aiBotExpertEnabled,
+        model: {
+          modelVersion: aiModel.modelVersion,
+          rulesFingerprintMatch: aiModel.rulesFingerprintMatch,
+        },
+        metrics: aiMetrics.snapshot(),
+      };
+      return;
+    }
+
     if (
       config.nodeEnv === 'test' &&
       email instanceof FakeEmailService &&
@@ -551,7 +574,11 @@ export const createGemCouncilApplication = async (
         const started = await lobby.start(authenticated, matchID);
         void botCoordinator.startMatch(matchID).catch((error: unknown) => {
           if (config.nodeEnv !== 'production') {
-            console.error('Bot coordinator failed to start match:', error);
+            console.error(
+              `Bot coordinator failed to start match: ${
+                error instanceof Error ? error.message : 'unknown error'
+              }`,
+            );
           }
         });
         ctx.body = started;
@@ -667,6 +694,7 @@ export const createGemCouncilApplication = async (
     accessTickets,
     botCoordinator,
     aiPool,
+    aiMetrics,
     socketTransport,
     start: async () => {
       if (running) return running;
@@ -691,15 +719,60 @@ export const createGemCouncilApplication = async (
   };
 };
 
-const loadAiWeights = (projectRoot: string): Record<string, number> => {
+interface AiModelInfo {
+  weights: Record<string, number>;
+  modelVersion: string;
+  rulesFingerprintMatch: boolean | null;
+}
+
+/**
+ * Loads the versioned heuristic model at startup. Never throws: a missing,
+ * corrupt or fingerprint-mismatched model degrades to the hand-tuned
+ * fallback so human-only paths keep working. The rules fingerprint is a
+ * compatibility check only and is logged without any secret material.
+ */
+const loadAiModel = (projectRoot: string): AiModelInfo => {
+  const fallback = (reason: string): AiModelInfo => {
+    console.warn(
+      `[ai] model unavailable (${reason}); using hand-tuned fallback weights.`,
+    );
+    return {
+      weights: { ...HAND_TUNED_WEIGHTS } as Record<string, number>,
+      modelVersion: 'hand-tuned-fallback',
+      rulesFingerprintMatch: null,
+    };
+  };
   try {
     const raw = readFileSync(
       join(projectRoot, 'ai_bot/models/heuristic-v1.json'),
       'utf8',
     );
     const model = parseModel(JSON.parse(raw));
-    return { ...weightsFromModel(model) } as Record<string, number>;
-  } catch {
-    return { ...HAND_TUNED_WEIGHTS } as Record<string, number>;
+    const current = rulesFingerprintOrNull(projectRoot);
+    const match =
+      current === null ? null : current === model.rulesFingerprint;
+    if (current === null) {
+      console.warn(
+        '[ai] rules fingerprint unavailable (source tree missing); compatibility check skipped.',
+      );
+    } else if (match === false) {
+      console.warn(
+        '[ai] model rules fingerprint mismatch; model may be incompatible with the deployed rules.',
+      );
+    }
+    console.log(
+      `[ai] model loaded: ${model.modelVersion} (rules fingerprint ${
+        match === true ? 'match' : match === false ? 'mismatch' : 'unchecked'
+      })`,
+    );
+    return {
+      weights: { ...weightsFromModel(model) } as Record<string, number>,
+      modelVersion: model.modelVersion,
+      rulesFingerprintMatch: match,
+    };
+  } catch (caught) {
+    return fallback(
+      caught instanceof Error ? caught.message : 'unknown error',
+    );
   }
 };

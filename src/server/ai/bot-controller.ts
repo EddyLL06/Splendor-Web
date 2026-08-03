@@ -32,6 +32,7 @@ import type {
 import type { AIObservation } from '../../shared/ai/observation.js';
 import type { SplendorState } from '../../shared/types/game.js';
 import type { AiWorkerPool } from './worker-pool.js';
+import type { AiMetrics } from './metrics.js';
 
 type GameClient = ReturnType<typeof Client<SplendorState>>;
 
@@ -60,6 +61,7 @@ export interface BotControllerOptions {
   weights: Record<string, number>;
   hardMaxMs: number;
   expertEnabled: boolean;
+  metrics?: AiMetrics;
 }
 
 export class BotController {
@@ -153,8 +155,14 @@ export class BotController {
       );
       const seed = `${this.options.matchID}:${playerID}:${stateID}`;
       const decision = await this.computeDecision(observation, ctx, seed);
-      if (this.stopped || generation !== this.generation) return;
-      if (this.lastStateID !== stateID) return;
+      if (this.stopped || generation !== this.generation) {
+        this.options.metrics?.recordStaleResult();
+        return;
+      }
+      if (this.lastStateID !== stateID) {
+        this.options.metrics?.recordStaleResult();
+        return;
+      }
       const moveType = decision.move.move;
       const args = decision.move.args;
       (this.client?.moves as unknown as Record<string, (...rest: unknown[]) => void>)[
@@ -162,6 +170,7 @@ export class BotController {
       ](...args);
     } catch (caught) {
       if (caught instanceof NoLegalActionError) {
+        this.options.metrics?.recordNoLegalAction();
         this.options.onError?.(caught);
         return;
       }
@@ -205,9 +214,14 @@ export class BotController {
           weights: this.options.weights,
           budget,
         };
-        return expertMode
+        const decision = expertMode
           ? await this.options.pool.requestExpertDecision(input, 'live')
           : await this.options.pool.requestHardDecision(input, 'live');
+        this.options.metrics?.recordDecision(
+          decision.elapsedMs,
+          this.options.difficulty,
+        );
+        return decision;
       }
       const input = {
         observation,
@@ -216,15 +230,31 @@ export class BotController {
         weights: this.options.weights,
         budget,
       };
-      return expertMode
+      const decision = expertMode
         ? computeExpertDecision(input)
         : computeHardDecision(input);
-    } catch {
+      this.options.metrics?.recordDecision(
+        decision.elapsedMs,
+        this.options.difficulty,
+      );
+      return decision;
+    } catch (caught) {
+      if (
+        caught instanceof Error &&
+        /WATCHDOG|QUEUE_FULL/.test(caught.message)
+      ) {
+        this.options.metrics?.recordTimeout();
+      }
+      this.options.metrics?.recordFallback('search');
       const fallback = chooseBotMove(observation, ctx, {
         policy: 'normal-v1',
         seed,
         weights: this.options.weights,
       });
+      this.options.metrics?.recordDecision(
+        fallback.elapsedMs,
+        this.options.difficulty,
+      );
       return { ...fallback, fallbackLevel: 2 as const };
     }
   }

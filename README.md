@@ -215,10 +215,51 @@ See `.env.example`; it contains names and safe defaults only.
 | `VERIFICATION_CODE_TTL_MINUTES` | `10` | Code lifetime |
 | `VERIFICATION_CODE_RESEND_SECONDS` | `60` | Durable resend cooldown |
 | `VERIFICATION_CODE_MAX_ATTEMPTS` | `5` | Durable wrong-code limit |
+| `AI_BOT_ENABLED` | `true` | `false` disables bot seats and AI workers entirely (pure-human rollback) |
+| `AI_BOT_WORKERS` | `auto` | `auto` = 1 on 2-vCPU boxes, 2 on larger; or an integer 0–4 |
+| `AI_BOT_QUEUE_LIMIT` | `256` | Max queued AI search jobs before fallback |
+| `AI_BOT_HARD_MAX_MS` | `80` | Hard search compute budget per move |
+| `AI_BOT_EXPERT_ENABLED` | `false` | Experimental Expert search; keep `false` unless benchmarked |
 
 Non-test secrets must contain at least 256 bits of random material. Rotate a
 secret deliberately: changing the session or game credential key invalidates
 the corresponding active credentials.
+
+## AI bots
+
+Room hosts can add Easy, Normal, or Hard bots to empty seats in 2–4 player
+games. Bot moves are computed server-side with a shared bounded worker pool,
+submitted through the same authoritative boardgame.io update path as human
+moves, and never trained or tuned inside the running site. All training
+commands below run offline on a development machine.
+
+Design constraints:
+
+- AI input comes only from the filtered `playerView`: real deck order and
+  opponents' blind reservation card IDs are never visible to a bot.
+- Each decision is bounded by CPU time, node count, and queue depth; timeouts
+  and overload degrade to the cheap Normal policy so a game never stalls.
+- On a 2-vCPU / 2 GB RAM server keep `AI_BOT_WORKERS=1` (the `auto` default
+  already picks 1 there) and `AI_BOT_EXPERT_ENABLED=false`. Expert is an
+  experiment and stays off unless its holdout win rate is proven.
+- The model is a single versioned JSON file:
+  `ai_bot/models/heuristic-v1.json`. At startup the server verifies its rules
+  fingerprint against the deployed rule sources and logs a warning on
+  mismatch; a missing/corrupt model falls back to built-in hand-tuned weights
+  without breaking human play.
+
+Rollback options (no database migration involved):
+
+1. `AI_BOT_ENABLED=false` disables bot seats, controllers, and worker threads
+   at the next restart.
+2. Revert `ai_bot/models/heuristic-v1.json` to the previous release's file.
+3. Revert the whole application with the normal Git rollback procedure.
+
+Observability: authenticated clients can read aggregate AI metrics at
+`GET /api/diagnostics/ai` (decision counts, duration percentiles, timeouts,
+fallbacks, no-legal/stale counters, peak queue depth, worker restarts, model
+version and fingerprint status). Logs only ever contain a short hash of a
+match ID, never full match state, hidden card IDs, tickets, or credentials.
 
 ## Security design
 
@@ -261,6 +302,12 @@ the corresponding active credentials.
 | `npm run test:watch` | Vitest watch mode |
 | `npm run build` | Generate data, typecheck, bundle client, compile server |
 | `npm start` | Start the compiled production Node server |
+| `npm run ai:smoke` | One-command offline AI smoke: small 2/3/4-player self-play + disable-flag check |
+| `npm run ai:self-play` | Deterministic offline self-play runs |
+| `npm run ai:benchmark` | Candidate vs frozen-baseline 2/3/4-player win-rate benchmark |
+| `npm run ai:tune` | Offline coordinate-search weight tuning |
+| `npm run ai:validate` | Holdout validation before model promotion |
+| `npm run ai:load-test` | Concurrent match load test for the worker pool |
 
 Each server-focused test suite creates its own temporary SQLite database and
 data directories outside `.local-data`, applies the committed migration, uses
