@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "modelVersion": "policy-attn-s6",
+  "arch": "attention",
+  "encoderVersion": "entity-obs-462-action-43-v1",
+  "obsDim": 462,
+  "actionDim": 43,
+  "onnxSha256": "4fb0a087448c5394d4de558fda05e3d63ccbdb84dabdb1ed0c7ebca58380405b",
+  "rulesFingerprint": "1ba7ffbd95104d3bd3da3bf9942087a720b23d965ac3a059977312e9396e9e192",
+  "createdAt": "2026-08-04T00:00:00.000Z",
+  "training": {
+    "algorithm": "expert-iteration-search-targets-v1",
+    "rounds": [
+      "neural-s1",
+      "neural-s2",
+      "neural-s3",
+      "neural-s4",
+      "neural-s5",
+      "neural-s6"
+    ],
+    "positions": 82358,
+    "teacher": "bot-tree-puct-96x2"
+  },
+  "validation": {
+    "baseline": "hard-v1",
+    "twoPlayerWinRate": 0.63,
+    "twoPlayerGames": 200,
+    "note": "Reliable 2p estimate; one 60-game run reached 80%. 3/4p not yet benchmarked."
+  }
+}

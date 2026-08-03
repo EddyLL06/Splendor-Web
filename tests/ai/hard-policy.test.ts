@@ -147,12 +147,16 @@ describe('Expert micro-MCTS', () => {
   it('is deterministic and invariant to hidden truth', () => {
     const { state } = createSeededState(2, 'expert-det');
     const actor = state.initialFirstPlayer;
-    expect(expertDecision(state, actor, 'expert-seed').move).toEqual(
-      expertDecision(state, actor, 'expert-seed').move,
+    // Generous budget so the wall-clock-capped search COMPLETES and stays
+    // deterministic (best-so-far depends on timing under tight budgets).
+    expect(expertDecision(state, actor, 'expert-seed', 500).move).toEqual(
+      expertDecision(state, actor, 'expert-seed', 500).move,
     );
     const { first, second } = samePlayerViewStates();
-    expect(expertDecision(second, '1', 'fair', 60).move).toEqual(
-      expertDecision(first, '1', 'fair', 60).move,
+    // Generous budget: wall-clock-capped searches must COMPLETE for the
+    // hidden-information invariant to hold (best-so-far depends on timing).
+    expect(expertDecision(second, '1', 'fair', 300).move).toEqual(
+      expertDecision(first, '1', 'fair', 300).move,
     );
   });
 

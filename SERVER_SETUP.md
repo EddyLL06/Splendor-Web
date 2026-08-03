@@ -260,6 +260,20 @@ SESSION_DURATION_DAYS=30
 VERIFICATION_CODE_TTL_MINUTES=10
 VERIFICATION_CODE_RESEND_SECONDS=60
 VERIFICATION_CODE_MAX_ATTEMPTS=5
+
+# AI bots. 2-vCPU/2 GB servers should keep AI_BOT_WORKERS=1. Expert uses the
+# bundled ONNX policy-value network with bounded PUCT search and falls back
+# to heuristic search if the model is missing. AI_BOT_ENABLED=false is a
+# no-migration pure-human rollback.
+AI_BOT_ENABLED=true
+AI_BOT_WORKERS=1
+AI_BOT_QUEUE_LIMIT=256
+AI_BOT_HARD_MAX_MS=80
+AI_BOT_EXPERT_ENABLED=true
+AI_BOT_NEURAL_MODEL=ai_bot/models/neural/policy-attn-s6.onnx
+AI_BOT_EXPERT_SIMS=96
+AI_BOT_EXPERT_DETERMINIZATIONS=2
+AI_BOT_EXPERT_MAX_MS=500
 ```
 
 Important checks before saving:
@@ -593,6 +607,7 @@ sudo -u gemcouncil -H npm run prisma:generate
 sudo -u gemcouncil -H npm run prisma:migrate:deploy
 sudo -u gemcouncil -H npm run typecheck
 sudo -u gemcouncil -H npm test
+sudo -u gemcouncil -H npm run ai:smoke
 sudo -u gemcouncil -H npm run build
 sudo systemctl start gem-council
 sudo systemctl status gem-council --no-pager
@@ -604,6 +619,21 @@ Finish with the public checks from the previous section. If an update fails,
 leave the service stopped, inspect the exact failed command, and restore both
 the previous Git commit and the matching pre-update data backup. Do not run a
 force reset or attempt to reverse a database migration blindly.
+
+### Updating or rolling back the AI model
+
+The AI model is one versioned JSON file, `ai_bot/models/heuristic-v1.json`,
+whose manifest records the exact rules fingerprint it was trained against.
+The server logs a warning at startup if that fingerprint no longer matches
+the deployed rules, and falls back to built-in hand-tuned weights if the file
+is missing or corrupt.
+
+- **Upgrade:** replace the model file (or deploy a commit containing the new
+  model), restart `gem-council`, and confirm the startup log says the rules
+  fingerprint matches. There is no database migration for AI data.
+- **Rollback:** either restore the previous model file, or set
+  `AI_BOT_ENABLED=false` in `.env` and restart. Disabling AI requires no
+  schema change and leaves account/room/human-play paths untouched.
 
 ## 15. Troubleshooting
 

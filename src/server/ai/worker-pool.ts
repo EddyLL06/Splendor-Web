@@ -12,6 +12,8 @@ import type { HardDecisionInput } from '../../shared/ai/search/beam.js';
 import { computeHardDecision } from '../../shared/ai/search/beam.js';
 import { computeExpertDecision } from '../../shared/ai/search/micro-mcts.js';
 import type { BotDecision } from '../../shared/ai/types.js';
+import type { ExpertMemorySnapshot } from '../../shared/ai/memory.js';
+import type { AiMetrics } from './metrics.js';
 
 interface QueuedJob {
   id: number;
@@ -48,6 +50,8 @@ export class AiWorkerPool {
       entry: string;
       queueLimit: number;
       hardMaxMs: number;
+      metrics?: AiMetrics;
+      workerData?: Record<string, unknown>;
     },
   ) {}
 
@@ -60,6 +64,10 @@ export class AiWorkerPool {
     };
   }
 
+  get workersActive(): number {
+    return this.workers.length;
+  }
+
   async requestHardDecision(
     input: HardDecisionInput,
     priority: 'live' | 'background' = 'live',
@@ -68,7 +76,7 @@ export class AiWorkerPool {
   }
 
   async requestExpertDecision(
-    input: HardDecisionInput,
+    input: HardDecisionInput & { memory?: ExpertMemorySnapshot },
     priority: 'live' | 'background' = 'live',
   ): Promise<BotDecision> {
     return this.request(input, 'expert', priority);
@@ -103,6 +111,7 @@ export class AiWorkerPool {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         this.timedOutJobs += 1;
+        this.options.metrics?.recordTimeout();
         reject(new Error('AI_BOT_WATCHDOG_TIMEOUT'));
       }, this.watchdogMs());
       timer.unref?.();
@@ -123,6 +132,9 @@ export class AiWorkerPool {
       } else {
         this.queue.push(job);
       }
+      this.options.metrics?.recordQueueDepth(
+        this.queue.length + this.pending.size,
+      );
       this.drain();
     });
   }
@@ -161,6 +173,7 @@ export class AiWorkerPool {
       execArgv: this.options.entry.endsWith('.ts')
         ? ['--import', 'tsx']
         : undefined,
+      workerData: this.options.workerData,
     });
     worker.on('message', (message: { id?: number; result?: BotDecision; error?: string }) => {
       if (message?.id === undefined) return;
@@ -181,10 +194,14 @@ export class AiWorkerPool {
     });
     worker.on('error', (error) => {
       this.restarts += 1;
+      this.options.metrics?.recordWorkerRestart();
       this.dropWorker(worker);
     });
     worker.on('exit', (code) => {
-      if (code !== 0 && !this.disposed) this.restarts += 1;
+      if (code !== 0 && !this.disposed) {
+        this.restarts += 1;
+        this.options.metrics?.recordWorkerRestart();
+      }
       this.dropWorker(worker);
     });
     return worker;
@@ -206,6 +223,7 @@ export class AiWorkerPool {
         const retryTimer = setTimeout(() => {
           this.pending.delete(id);
           this.timedOutJobs += 1;
+          this.options.metrics?.recordTimeout();
           job.reject(new Error('AI_BOT_WATCHDOG_TIMEOUT'));
         }, this.watchdogMs());
         retryTimer.unref?.();

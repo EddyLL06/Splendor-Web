@@ -19,6 +19,7 @@ import {
   NoLegalActionError,
 } from './errors.js';
 import { determinize } from './hidden-information.js';
+import type { ExpertMemorySnapshot } from './memory.js';
 import {
   assertObservationIntegrity,
   type AIObservation,
@@ -108,6 +109,8 @@ export const chooseBotMove = (
     seed: string;
     weights?: Record<string, number>;
     budgetMs?: number;
+    /** Public-info-only match memory consumed by the Expert policy. */
+    memory?: ExpertMemorySnapshot;
   },
 ): BotDecision => {
   const startedAt = performance.now();
@@ -139,12 +142,13 @@ export const chooseBotMove = (
       seed: options.seed,
       weights: options.weights ?? {},
       budget: {
-        deadlineEpochMs: performance.now() + (options.budgetMs ?? 120),
-        maxNodes: 800,
+        deadlineEpochMs: performance.now() + (options.budgetMs ?? 180),
+        maxNodes: 1600,
         beamWidth: 3,
         maxDeterminizations: 4,
         maxSimulations: 150,
       },
+      memory: options.memory,
     });
     validateMove(fullState, observation.playerID, ctx, decision);
     return decision;

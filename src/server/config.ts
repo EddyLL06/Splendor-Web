@@ -35,6 +35,10 @@ export interface AppConfig {
   aiBotQueueLimit: number;
   aiBotHardMaxMs: number;
   aiBotExpertEnabled: boolean;
+  aiBotNeuralModel: string;
+  aiBotExpertSims: number;
+  aiBotExpertDeterminizations: number;
+  aiBotExpertMaxMs: number;
 }
 
 const parseInteger = (
@@ -268,7 +272,27 @@ export const createConfig = (
     aiBotWorkers: parseAiBotWorkers(env),
     aiBotQueueLimit: parseInteger(env, 'AI_BOT_QUEUE_LIMIT', 256, 1, 10_000),
     aiBotHardMaxMs: parseInteger(env, 'AI_BOT_HARD_MAX_MS', 80, 1, 1000),
-    aiBotExpertEnabled: parseBoolean(env, 'AI_BOT_EXPERT_ENABLED', false),
+    aiBotExpertEnabled: parseBoolean(env, 'AI_BOT_EXPERT_ENABLED', true),
+    aiBotNeuralModel: resolve(
+      projectRoot,
+      env.AI_BOT_NEURAL_MODEL?.trim() ||
+        'ai_bot/models/neural/policy-attn-s6.onnx',
+    ),
+    aiBotExpertSims: parseInteger(env, 'AI_BOT_EXPERT_SIMS', 96, 1, 10_000),
+    aiBotExpertDeterminizations: parseInteger(
+      env,
+      'AI_BOT_EXPERT_DETERMINIZATIONS',
+      2,
+      1,
+      8,
+    ),
+    aiBotExpertMaxMs: parseInteger(
+      env,
+      'AI_BOT_EXPERT_MAX_MS',
+      500,
+      100,
+      5000,
+    ),
     defaultLocale: 'en',
   };
 };

@@ -40,7 +40,7 @@ export interface SearchBudget {
 export interface BotDecision {
   move: BotMove;
   modelVersion: string;
-  policy: AgentPolicyID | 'easy-v1';
+  policy: AgentPolicyID | 'easy-v1' | 'neural-v1' | 'neural-puct-v1';
   seed: string;
   nodesVisited: number;
   elapsedMs: number;

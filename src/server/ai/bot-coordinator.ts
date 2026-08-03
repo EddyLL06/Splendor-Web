@@ -10,6 +10,8 @@ import type { RoomRegistry } from '../multiplayer/room-registry.js';
 import type { BotSeatMetadata } from './bot-seat.js';
 import { BotController } from './bot-controller.js';
 import type { AiWorkerPool } from './worker-pool.js';
+import type { AiMetrics } from './metrics.js';
+import { shortHash } from './sanitize.js';
 
 const BOT_TICKET_TTL_MS = 12 * 60 * 60_000;
 
@@ -24,6 +26,7 @@ export class BotCoordinator {
       tickets: GameAccessTicketService;
       config: AppConfig;
       weights: Record<string, number>;
+      metrics?: AiMetrics;
     },
   ) {}
 
@@ -65,8 +68,14 @@ export class BotCoordinator {
         weights: this.dependencies.weights,
         hardMaxMs: this.dependencies.config.aiBotHardMaxMs,
         expertEnabled: this.dependencies.config.aiBotExpertEnabled,
+        expertMaxMs: this.dependencies.config.aiBotExpertMaxMs,
+        metrics: this.dependencies.metrics,
         onError: (error) => {
-          console.error(`[bot-controller] ${matchID}/${seatID}:`, error);
+          console.error(
+            `[bot-controller] match=${shortHash(matchID)} seat=${seatID}: ${
+              error instanceof Error ? error.message : 'unknown error'
+            }`,
+          );
         },
       });
       controllers.push(controller);
