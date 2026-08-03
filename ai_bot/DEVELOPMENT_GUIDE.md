@@ -504,7 +504,7 @@ value(state, perspective) = Σ normalizedFeature_i × weight_i
 
 - “硬预算”是 worker 内主动检查的 deadline，不是平均目标。
 - 每扩展固定数量节点都检查 deadline；到期立即返回 best-so-far。
-- coordinator 另设外部 watchdog，例如预算 + 50ms。worker 无响应时终止/重建该 worker，并使用 Normal 或 Easy 回退。
+- coordinator 另设外部 watchdog，例如预算 + 50ms（至少 2s，为 worker 冷启动留出余量）。worker 无响应时终止/重建该 worker，并使用 Normal 或 Easy 回退。
 - 人类观感延迟建议 350–650ms，使用 seeded 抖动；它不计入 AI CPU 预算，也不占 worker。
 - 若候选很少或能立即结束游戏，允许提前返回。
 - Expert 必须用功能开关；没有显著胜率收益时不值得生产成本。

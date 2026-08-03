@@ -74,6 +74,16 @@ export class AiWorkerPool {
     return this.request(input, 'expert', priority);
   }
 
+  /**
+   * The search budget only bounds compute inside the worker; worker-thread
+   * startup (module/tsx loading) and IPC round-trips add time on top,
+   * especially on cold CI/containers. Keep a minimum grace so the watchdog
+   * never races ahead of a cold worker boot.
+   */
+  private watchdogMs(): number {
+    return Math.max(this.options.hardMaxMs + 50, 2_000);
+  }
+
   private async request(
     input: HardDecisionInput,
     mode: 'hard' | 'expert',
@@ -94,7 +104,7 @@ export class AiWorkerPool {
         this.pending.delete(id);
         this.timedOutJobs += 1;
         reject(new Error('AI_BOT_WATCHDOG_TIMEOUT'));
-      }, this.options.hardMaxMs + 50);
+      }, this.watchdogMs());
       timer.unref?.();
       const job: QueuedJob = {
         id,
@@ -197,7 +207,7 @@ export class AiWorkerPool {
           this.pending.delete(id);
           this.timedOutJobs += 1;
           job.reject(new Error('AI_BOT_WATCHDOG_TIMEOUT'));
-        }, this.options.hardMaxMs + 50);
+        }, this.watchdogMs());
         retryTimer.unref?.();
         this.queue.unshift({ ...job, timer: retryTimer, worker: undefined });
       }
