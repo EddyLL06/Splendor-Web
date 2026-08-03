@@ -29,7 +29,11 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
       tickets: GameAccessTicketService;
     },
   ) {
-    super();
+    // boardgame.io's SocketOpts type marks socket.io ServerOptions as fully
+    // required; only the fields we set are applied at runtime.
+    super({
+      socketOpts: { transports: ['websocket'] } as unknown as import('socket.io').ServerOptions,
+    });
     this.dependencies.rooms.setDeletionHandler((matchID) =>
       this.disconnectMatch(matchID),
     );

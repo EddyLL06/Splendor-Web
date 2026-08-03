@@ -83,7 +83,7 @@ describe('round 2: bot seats, lifecycle and Easy bot play', () => {
       credentials,
       multiplayer: SocketIO({
         server: `http://localhost:${environment.config.port}`,
-        socketOpts: { auth: { accessTicket } },
+        socketOpts: { auth: { accessTicket }, transports: ['websocket'] },
       }),
     });
     clients.push(client);

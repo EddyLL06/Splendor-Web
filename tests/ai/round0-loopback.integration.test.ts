@@ -49,7 +49,7 @@ describe('round 0: loopback bot move spike', () => {
       credentials,
       multiplayer: SocketIO({
         server: `http://localhost:${environment.config.port}`,
-        socketOpts: { auth: { accessTicket } },
+        socketOpts: { auth: { accessTicket }, transports: ['websocket'] },
       }),
     });
     clients.push(client);
@@ -63,7 +63,7 @@ describe('round 0: loopback bot move spike', () => {
   ): Socket => {
     const socket = createSocket(
       `http://localhost:${environment.config.port}/${SplendorGame.name}`,
-      { auth: { accessTicket } },
+      { auth: { accessTicket }, transports: ['websocket'] },
     );
     rawSockets.push(socket);
     return socket;

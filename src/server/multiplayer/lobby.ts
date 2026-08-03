@@ -765,7 +765,13 @@ export class LobbyService {
           id: Number(player.id),
           ...(player.name ? { name: player.name } : {}),
           ...(bot
-            ? { kind: 'bot', difficulty: data.difficulty }
+            ? {
+                kind: 'bot',
+                difficulty: data.difficulty,
+                ...(room.startedAt !== null
+                  ? { connectionStatus: 'online' as const }
+                  : {}),
+              }
             : {}),
           ...(!bot && room.startedAt !== null && data
             ? {

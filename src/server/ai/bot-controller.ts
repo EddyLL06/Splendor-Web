@@ -74,7 +74,7 @@ export class BotController {
       credentials,
       multiplayer: SocketIO({
         server: serverURL,
-        socketOpts: { auth: { accessTicket } },
+        socketOpts: { auth: { accessTicket }, transports: ['websocket'] },
       }),
     });
     this.client = client;

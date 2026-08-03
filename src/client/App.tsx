@@ -22,6 +22,7 @@ import {
 import { AuthScreen } from './screens/AuthScreen.js';
 import { LobbyScreen } from './screens/LobbyScreen.js';
 import { WaitingRoom } from './screens/WaitingRoom.js';
+import type { BotDifficulty } from '../shared/ai/types.js';
 
 function GameLoading() {
   const { t } = useTranslation();
@@ -39,7 +40,7 @@ const authenticatedSocketTransport = (
 ) => {
   const createTransport = SocketIO({
     server: GAME_SERVER_URL,
-    socketOpts: { auth: { accessTicket } },
+    socketOpts: { auth: { accessTicket }, transports: ['websocket'] },
   });
   return (options: Parameters<typeof createTransport>[0]) => {
     const transport = createTransport(options);
@@ -375,6 +376,11 @@ export default function App() {
       player.connectionStatus ?? 'reconnecting',
     ]),
   );
+  const playerDifficulties = Object.fromEntries(
+    readyMatch.players
+      .filter((player) => player.difficulty !== undefined)
+      .map((player) => [String(player.id), player.difficulty as BotDifficulty]),
+  );
 
   return (
     <MultiplayerGame
@@ -387,6 +393,7 @@ export default function App() {
       playerNames={playerNames}
       playerAvatars={playerAvatars}
       playerConnections={playerConnections}
+      playerDifficulties={playerDifficulties}
       accountMenu={<AccountMenu />}
       sessionMode={session.mode}
       room={readyMatch.room}
