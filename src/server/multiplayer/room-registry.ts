@@ -3,7 +3,7 @@ import { SPECTATOR_CAPACITY } from '../../shared/types/room.js';
 
 export const SPECTATOR_DISCONNECT_GRACE_MS = 10_000;
 export const PLAYER_CONNECTION_TOLERANCE_MS = 15_000;
-export const PLAYER_ABANDON_TIMEOUT_MS = 5 * 60_000;
+export const PLAYER_ABANDON_TIMEOUT_MS = 3 * 60_000;
 
 export interface SpectatorMembership {
   userId: string;

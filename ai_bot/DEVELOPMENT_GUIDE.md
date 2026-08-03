@@ -227,7 +227,7 @@ export interface BotDecision {
 
 ### 4.1 为什么必须先改席位模型
 
-当前 `SeatMetadata`、`LobbyService.start()` 和 `RoomRegistry.start()` 假设每个占用席位都有真人 `userId`。连接状态、5 分钟离线清理、host 转移、reclaim、角色切换和 rematch 也都围绕真人会话设计。
+当前 `SeatMetadata`、`LobbyService.start()` 和 `RoomRegistry.start()` 假设每个占用席位都有真人 `userId`。连接状态、3 分钟离线清理、host 转移、reclaim、角色切换和 rematch 也都围绕真人会话设计。
 
 因此必须把席位改成 tagged union，并逐一审计这些路径：
 
