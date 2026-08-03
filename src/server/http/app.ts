@@ -189,12 +189,16 @@ export const createGemCouncilApplication = async (
     botCredentials,
     rooms,
     accessTickets,
+    onRoomChange: (matchID) => socketTransport.broadcastMatch(matchID),
   });
   const socketTransport = new AuthenticatedSocketIO({
     db: matchStore,
     rooms,
     tickets: accessTickets,
   });
+  socketTransport.setRoomSnapshotProvider((access) =>
+    lobby.roomSnapshotForAccess(access),
+  );
   const botCoordinator = new BotCoordinator({
     db: matchStore,
     rooms,
@@ -525,7 +529,7 @@ export const createGemCouncilApplication = async (
 
     const roomActionRoute = routeMatch(
       ctx.path,
-      /^\/api\/matches\/([^/]+)\/(room|start|roles\/spectator|roles\/player|spectators\/join|spectators|spectators\/heartbeat|access-ticket)$/,
+      /^\/api\/matches\/([^/]+)\/(room|start|roles\/spectator|roles\/player|spectators\/join|spectators|spectators\/heartbeat|access-ticket|room-ticket)$/,
     );
     if (roomActionRoute) {
       const matchID = decodePathSegment(roomActionRoute[1]);
@@ -603,6 +607,10 @@ export const createGemCouncilApplication = async (
           matchID,
           await parseJsonBody(),
         );
+        return;
+      }
+      if (ctx.method === 'POST' && action === 'room-ticket') {
+        ctx.body = await lobby.issueRoomAccess(authenticated, matchID);
         return;
       }
     }

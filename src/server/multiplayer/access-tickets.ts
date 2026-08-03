@@ -3,7 +3,7 @@ import type { AppConfig } from '../config.js';
 import { constantTimeEqual, createOpaqueToken, hmac } from '../security/crypto.js';
 import type { AuthenticatedSession } from '../auth/session.js';
 
-export type GameAccessRole = 'player' | 'spectator' | 'bot';
+export type GameAccessRole = 'player' | 'spectator' | 'bot' | 'room';
 
 export interface GameAccessTicketPayload {
   v: 1;
@@ -18,6 +18,7 @@ export interface GameAccessTicketPayload {
 }
 
 const ACCESS_TICKET_TTL_MS = 8 * 60_000;
+const ROOM_TICKET_TTL_MS = 12 * 60 * 60_000;
 
 const parsePayload = (encoded: string): GameAccessTicketPayload | null => {
   try {
@@ -32,7 +33,8 @@ const parsePayload = (encoded: string): GameAccessTicketPayload | null => {
       typeof value.nonce !== 'string' ||
       (value.role !== 'player' &&
         value.role !== 'spectator' &&
-        value.role !== 'bot')
+        value.role !== 'bot' &&
+        value.role !== 'room')
     ) {
       return null;
     }
@@ -50,6 +52,7 @@ const parsePayload = (encoded: string): GameAccessTicketPayload | null => {
     if (
       typeof value.uid !== 'string' ||
       typeof value.sid !== 'string' ||
+      (value.role === 'room' && value.pid !== undefined) ||
       (value.role === 'player' && typeof value.pid !== 'string') ||
       (value.role === 'spectator' && value.pid !== undefined)
     ) {
@@ -89,6 +92,28 @@ export class GameAccessTicketService {
     const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const signature = hmac(this.config.gameCredentialSecret, `access:${encoded}`);
     return { accessTicket: `${encoded}.${signature}`, expiresAt };
+  }
+
+  issueRoom(
+    session: AuthenticatedSession,
+    matchID: string,
+  ): { roomTicket: string; expiresAt: number } {
+    const expiresAt = Math.min(
+      session.expiresAt.getTime(),
+      this.now().getTime() + ROOM_TICKET_TTL_MS,
+    );
+    const payload: GameAccessTicketPayload = {
+      v: 1,
+      uid: session.user.id,
+      sid: session.id,
+      mid: matchID,
+      role: 'room',
+      exp: expiresAt,
+      nonce: createOpaqueToken(),
+    };
+    const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const signature = hmac(this.config.gameCredentialSecret, `access:${encoded}`);
+    return { roomTicket: `${encoded}.${signature}`, expiresAt };
   }
 
   /**

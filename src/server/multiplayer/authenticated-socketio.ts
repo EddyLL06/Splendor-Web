@@ -10,6 +10,7 @@ import {
 } from '../ai/bot-seat.js';
 import type { MatchDatabase, MatchMetadata } from './lobby.js';
 import type { RoomRegistry } from './room-registry.js';
+import type { RoomMatch } from '../../shared/types/room.js';
 
 interface SocketData {
   access?: GameAccessTicketPayload;
@@ -21,6 +22,8 @@ type AuthenticatedSocket = Socket & { data: SocketData };
 
 export class AuthenticatedSocketIO extends BoardgameSocketIO {
   private readonly socketsBySession = new Map<string, Set<AuthenticatedSocket>>();
+  private readonly socketsByMatch = new Map<string, Set<AuthenticatedSocket>>();
+  private snapshotProvider?: (access: GameAccessTicketPayload) => Promise<RoomMatch>;
 
   constructor(
     private readonly dependencies: {
@@ -39,6 +42,12 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
     );
   }
 
+  setRoomSnapshotProvider(
+    provider: (access: GameAccessTicketPayload) => Promise<RoomMatch>,
+  ): void {
+    this.snapshotProvider = provider;
+  }
+
   override init(
     app: BoardgameServer.App & { _io?: import('socket.io').Server },
     games: Game[],
@@ -51,8 +60,18 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
       namespace.use(async (rawSocket, next) => {
         const socket = rawSocket as AuthenticatedSocket;
         const accessTicket = socket.handshake.auth?.accessTicket;
-        const payload = await this.dependencies.tickets.verify(accessTicket);
-        if (!payload || !(await this.isAuthorized(payload))) {
+        let payload: GameAccessTicketPayload | null = null;
+        try {
+          payload = await this.dependencies.tickets.verify(accessTicket);
+        } catch {
+          next(new Error('GAME_ACCESS_INVALID'));
+          return;
+        }
+        if (
+          !payload ||
+          payload.role === 'room' ||
+          !(await this.isAuthorized(payload))
+        ) {
           next(new Error('GAME_ACCESS_INVALID'));
           return;
         }
@@ -73,9 +92,16 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
         this.socketsBySession.set(sessionKey, sessionSockets);
 
         socket.use(async (packet, next) => {
-          const refreshed = await this.dependencies.tickets.verify(
-            socket.data.accessTicket,
-          );
+          let refreshed: GameAccessTicketPayload | null = null;
+          try {
+            refreshed = await this.dependencies.tickets.verify(
+              socket.data.accessTicket,
+            );
+          } catch {
+            next(new Error('GAME_ACCESS_INVALID'));
+            socket.disconnect(true);
+            return;
+          }
           if (!refreshed || !(await this.isAuthorized(refreshed))) {
             next(new Error('GAME_ACCESS_INVALID'));
             socket.disconnect(true);
@@ -108,6 +134,7 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
                   socket.id,
                 );
               }
+              this.broadcastMatch(refreshed.mid);
             } catch {
               next(new Error('GAME_ACCESS_INVALID'));
               socket.disconnect(true);
@@ -124,7 +151,8 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
               if (!payload || !(await this.isAuthorized(payload))) {
                 socket.disconnect(true);
               }
-            });
+            })
+            .catch(() => undefined);
         }, 5_000);
         socket.data.accessCheck.unref?.();
 
@@ -150,6 +178,7 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
               socket.id,
             );
           }
+          if (current) this.broadcastMatch(current.mid);
           if (current) {
             const sessionKey = current.sid ?? `bot:${current.bid}`;
             const sockets = this.socketsBySession.get(sessionKey);
@@ -159,6 +188,91 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
         });
       });
     }
+
+    const roomNamespace = app._io?.of('/room');
+    if (!roomNamespace) {
+      throw new Error('Socket.IO room namespace was not initialized.');
+    }
+    roomNamespace.use(async (rawSocket, next) => {
+      const socket = rawSocket as AuthenticatedSocket;
+      const roomTicket = socket.handshake.auth?.roomTicket;
+      let payload: GameAccessTicketPayload | null = null;
+      try {
+        payload = await this.dependencies.tickets.verify(roomTicket);
+      } catch {
+        next(new Error('ROOM_ACCESS_INVALID'));
+        return;
+      }
+      if (
+        !payload ||
+        payload.role !== 'room' ||
+        !(await this.isAuthorizedRoom(payload))
+      ) {
+        next(new Error('ROOM_ACCESS_INVALID'));
+        return;
+      }
+      socket.data.access = payload;
+      socket.data.accessTicket = roomTicket;
+      next();
+    });
+    roomNamespace.on('connection', (rawSocket) => {
+      const socket = rawSocket as AuthenticatedSocket;
+      const access = socket.data.access;
+      if (!access || access.role !== 'room') {
+        socket.disconnect(true);
+        return;
+      }
+      const matchSockets = this.socketsByMatch.get(access.mid) ?? new Set();
+      matchSockets.add(socket);
+      this.socketsByMatch.set(access.mid, matchSockets);
+
+      // A live room socket doubles as spectator presence so no HTTP
+      // heartbeat is needed while the channel is open.
+      if (this.dependencies.rooms.get(access.mid)?.spectators.has(access.uid)) {
+        try {
+          this.dependencies.rooms.connectSpectator(
+            access.mid,
+            access.uid,
+            socket.id,
+          );
+        } catch {
+          // The spectator may have been removed between the checks.
+        }
+      }
+
+      socket.data.accessCheck = setInterval(() => {
+        void this.dependencies.tickets
+          .verify(socket.data.accessTicket)
+          .then(async (payload) => {
+            if (
+              !payload ||
+              payload.role !== 'room' ||
+              !(await this.isAuthorizedRoom(payload))
+            ) {
+              socket.disconnect(true);
+            }
+          })
+          .catch(() => undefined);
+      }, 5_000);
+      socket.data.accessCheck.unref?.();
+
+      socket.on('disconnect', () => {
+        if (socket.data.accessCheck) clearInterval(socket.data.accessCheck);
+        const current = socket.data.access;
+        if (current?.role === 'room') {
+          if (this.dependencies.rooms.get(current.mid)?.spectators.has(current.uid)) {
+            this.dependencies.rooms.disconnectSpectator(
+              current.mid,
+              current.uid,
+              socket.id,
+            );
+          }
+          const sockets = this.socketsByMatch.get(current.mid);
+          sockets?.delete(socket);
+          if (sockets?.size === 0) this.socketsByMatch.delete(current.mid);
+        }
+      });
+    });
   }
 
   disconnectSession(sessionID: string): void {
@@ -166,11 +280,21 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
       socket.disconnect(true);
     }
     this.socketsBySession.delete(sessionID);
+    for (const sockets of this.socketsByMatch.values()) {
+      for (const socket of [...sockets]) {
+        if (socket.data.access?.sid === sessionID) socket.disconnect(true);
+      }
+    }
   }
 
   disconnectUser(userID: string): void {
     for (const sockets of this.socketsBySession.values()) {
       for (const socket of sockets) {
+        if (socket.data.access?.uid === userID) socket.disconnect(true);
+      }
+    }
+    for (const sockets of this.socketsByMatch.values()) {
+      for (const socket of [...sockets]) {
         if (socket.data.access?.uid === userID) socket.disconnect(true);
       }
     }
@@ -182,6 +306,55 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
         if (socket.data.access?.mid === matchID) socket.disconnect(true);
       }
     }
+    for (const socket of this.socketsByMatch.get(matchID) ?? []) {
+      socket.disconnect(true);
+    }
+    this.socketsByMatch.delete(matchID);
+  }
+
+  /**
+   * Pushes the current public room snapshot to every live /room socket for
+   * the match. Each socket receives the viewer-specific projection for its
+   * own user.
+   */
+  broadcastMatch(matchID: string): void {
+    const sockets = this.socketsByMatch.get(matchID);
+    if (!sockets || sockets.size === 0 || !this.snapshotProvider) return;
+    for (const socket of sockets) {
+      const access = socket.data.access;
+      if (!access) continue;
+      void this.snapshotProvider(access)
+        .then((room) => {
+          if (socket.connected) {
+            socket.emit('room:update', { version: Date.now(), room });
+          }
+        })
+        .catch((error: unknown) => {
+          if (process.env.NODE_ENV !== 'production') {
+            console.error('Room broadcast failed:', error);
+          }
+        });
+    }
+  }
+
+  private async isAuthorizedRoom(
+    payload: GameAccessTicketPayload,
+  ): Promise<boolean> {
+    if (payload.role !== 'room') return false;
+    const room = this.dependencies.rooms.get(payload.mid);
+    if (!room) return false;
+    if (room.spectators.has(payload.uid!)) return true;
+    const result = await Promise.resolve(
+      this.dependencies.db.fetch(payload.mid, { metadata: true }),
+    );
+    const metadata = result.metadata as MatchMetadata | undefined;
+    return Boolean(
+      metadata &&
+        Object.values(metadata.players).some((player) => {
+          const data = player.data as SeatMetadata | BotSeatMetadata | undefined;
+          return !isBotSeatMetadata(data) && data?.userId === payload.uid;
+        }),
+    );
   }
 
   private async isAuthorized(payload: GameAccessTicketPayload): Promise<boolean> {
