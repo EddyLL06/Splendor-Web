@@ -51,6 +51,7 @@ export class AiWorkerPool {
       queueLimit: number;
       hardMaxMs: number;
       metrics?: AiMetrics;
+      workerData?: Record<string, unknown>;
     },
   ) {}
 
@@ -172,6 +173,7 @@ export class AiWorkerPool {
       execArgv: this.options.entry.endsWith('.ts')
         ? ['--import', 'tsx']
         : undefined,
+      workerData: this.options.workerData,
     });
     worker.on('message', (message: { id?: number; result?: BotDecision; error?: string }) => {
       if (message?.id === undefined) return;

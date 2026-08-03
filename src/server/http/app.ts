@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { Server as HttpServer } from 'node:http';
 import { unlink } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type Koa from 'koa';
@@ -218,8 +218,23 @@ export const createGemCouncilApplication = async (
     queueLimit: config.aiBotQueueLimit,
     hardMaxMs: config.aiBotHardMaxMs,
     metrics: aiMetrics,
+    workerData: {
+      expertEnabled: config.aiBotExpertEnabled,
+      neuralModelPath: config.aiBotNeuralModel,
+      expertSims: config.aiBotExpertSims,
+      expertDeterminizations: config.aiBotExpertDeterminizations,
+      expertMaxMs: config.aiBotExpertMaxMs,
+    },
   });
   botCoordinator.setPool(aiPool);
+  if (config.aiBotExpertEnabled) {
+    const neuralPresent = existsSync(config.aiBotNeuralModel);
+    console.log(
+      `[ai] neural expert model: ${neuralPresent ? 'present' : 'MISSING'} (${
+        config.aiBotNeuralModel
+      }${neuralPresent ? '' : '; expert falls back to heuristic search'})`,
+    );
+  }
   rooms.setDeletionHandler((matchID) => {
     socketTransport.disconnectMatch(matchID);
     botCoordinator.stopMatch(matchID);
@@ -473,6 +488,12 @@ export const createGemCouncilApplication = async (
         workerCount: config.aiBotWorkers,
         workersActive: aiPool.workersActive,
         expertEnabled: config.aiBotExpertEnabled,
+        expertModel: {
+          path: config.aiBotNeuralModel,
+          sims: config.aiBotExpertSims,
+          determinizations: config.aiBotExpertDeterminizations,
+          maxMs: config.aiBotExpertMaxMs,
+        },
         model: {
           modelVersion: aiModel.modelVersion,
           rulesFingerprintMatch: aiModel.rulesFingerprintMatch,

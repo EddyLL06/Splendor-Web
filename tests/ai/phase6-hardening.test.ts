@@ -91,6 +91,7 @@ describe('phase 6: AI_BOT_ENABLED=false rollback', () => {
     environment = await createTestApplication('phase6-ai-off', {
       AI_BOT_ENABLED: 'false',
       AI_BOT_WORKERS: 'auto',
+      AI_BOT_EXPERT_ENABLED: 'false',
     });
     await environment.app.start();
     account = await registerAccount(environment, 'PhaseSixUser');

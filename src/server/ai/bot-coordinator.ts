@@ -68,6 +68,7 @@ export class BotCoordinator {
         weights: this.dependencies.weights,
         hardMaxMs: this.dependencies.config.aiBotHardMaxMs,
         expertEnabled: this.dependencies.config.aiBotExpertEnabled,
+        expertMaxMs: this.dependencies.config.aiBotExpertMaxMs,
         metrics: this.dependencies.metrics,
         onError: (error) => {
           console.error(

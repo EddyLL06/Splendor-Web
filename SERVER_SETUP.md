@@ -261,14 +261,19 @@ VERIFICATION_CODE_TTL_MINUTES=10
 VERIFICATION_CODE_RESEND_SECONDS=60
 VERIFICATION_CODE_MAX_ATTEMPTS=5
 
-# AI bots. 2-vCPU/2 GB servers should keep AI_BOT_WORKERS=1 and leave
-# AI_BOT_EXPERT_ENABLED=false. AI_BOT_ENABLED=false is a no-migration
-# pure-human rollback.
+# AI bots. 2-vCPU/2 GB servers should keep AI_BOT_WORKERS=1. Expert uses the
+# bundled ONNX policy-value network with bounded PUCT search and falls back
+# to heuristic search if the model is missing. AI_BOT_ENABLED=false is a
+# no-migration pure-human rollback.
 AI_BOT_ENABLED=true
 AI_BOT_WORKERS=1
 AI_BOT_QUEUE_LIMIT=256
 AI_BOT_HARD_MAX_MS=80
-AI_BOT_EXPERT_ENABLED=false
+AI_BOT_EXPERT_ENABLED=true
+AI_BOT_NEURAL_MODEL=ai_bot/models/neural/policy-attn-s6.onnx
+AI_BOT_EXPERT_SIMS=96
+AI_BOT_EXPERT_DETERMINIZATIONS=2
+AI_BOT_EXPERT_MAX_MS=500
 ```
 
 Important checks before saving:

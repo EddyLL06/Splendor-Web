@@ -66,6 +66,7 @@ export interface BotControllerOptions {
   weights: Record<string, number>;
   hardMaxMs: number;
   expertEnabled: boolean;
+  expertMaxMs: number;
   metrics?: AiMetrics;
 }
 
@@ -214,7 +215,8 @@ export class BotController {
       this.options.difficulty === 'expert' && this.options.expertEnabled;
     const budget = {
       deadlineEpochMs:
-        performance.now() + (expertMode ? 180 : this.options.hardMaxMs),
+        performance.now() +
+        (expertMode ? this.options.expertMaxMs : this.options.hardMaxMs),
       maxNodes: expertMode ? 1600 : 800,
       beamWidth: 5,
       maxDeterminizations: 1,
