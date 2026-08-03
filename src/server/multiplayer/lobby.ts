@@ -25,7 +25,10 @@ import {
   spectatorJoinSchema,
   switchToPlayerSchema,
 } from '../validation/auth.js';
-import type { GameAccessTicketService } from './access-tickets.js';
+import type {
+  GameAccessTicketPayload,
+  GameAccessTicketService,
+} from './access-tickets.js';
 import type { BotTicketService } from '../ai/bot-ticket.js';
 import type { SeatCredentialService, SeatMetadata } from './credentials.js';
 import {
@@ -153,6 +156,7 @@ export interface LobbyServiceOptions {
   botCredentials: BotTicketService;
   rooms: RoomRegistry;
   accessTickets: GameAccessTicketService;
+  onRoomChange?: (matchID: string) => void;
 }
 
 export class LobbyService {
@@ -163,6 +167,10 @@ export class LobbyService {
     this.options.rooms.setPlayerExpirationHandler((matchID, playerID) =>
       this.expireInactivePlayer(matchID, playerID),
     );
+  }
+
+  private notifyRoomChange(matchID: string): void {
+    this.options.onRoomChange?.(matchID);
   }
 
   async listGames(): Promise<string[]> {
@@ -211,14 +219,16 @@ export class LobbyService {
     const matches: RoomMatch[] = [];
     for (const matchID of ids) {
       const metadata = await fetchMetadata(this.options.db, matchID);
-      if (!metadata.unlisted) matches.push(this.publicMatch(session, matchID, metadata));
+      if (!metadata.unlisted) {
+        matches.push(this.publicMatch(session.user.id, matchID, metadata));
+      }
     }
     return { matches };
   }
 
   async get(session: AuthenticatedSession, matchID: string): Promise<RoomMatch> {
     return this.publicMatch(
-      session,
+      session.user.id,
       matchID,
       await fetchMetadata(this.options.db, matchID),
     );
@@ -253,6 +263,7 @@ export class LobbyService {
       }
       touchMetadata(metadata);
       await resolveResult(this.options.db.setMetadata(matchID, metadata));
+      this.notifyRoomChange(matchID);
       return { playerID, playerCredentials };
     });
   }
@@ -270,6 +281,7 @@ export class LobbyService {
       player.credentials = playerCredentials;
       touchMetadata(metadata);
       await resolveResult(this.options.db.setMetadata(matchID, metadata));
+      this.notifyRoomChange(matchID);
       return {
         playerID,
         playerCredentials,
@@ -307,6 +319,7 @@ export class LobbyService {
         if (nextHost) room.hostUserId = nextHost;
       }
       await this.persistOrDeleteEmpty(matchID, metadata);
+      this.notifyRoomChange(matchID);
       return {};
     });
   }
@@ -344,8 +357,10 @@ export class LobbyService {
       this.options.rooms.setAllowSpectators(matchID, input.allowSpectators);
       if (!this.hasParticipants(metadata, matchID)) {
         await this.deleteMatch(matchID);
+        this.notifyRoomChange(matchID);
         return { deleted: true, removedSpectators: 0 };
       }
+      this.notifyRoomChange(matchID);
       return {
         deleted: false,
         removedSpectators: input.allowSpectators ? 0 : room.evictions.size,
@@ -368,7 +383,9 @@ export class LobbyService {
           : { userId: (player.data as SeatMetadata).userId }),
         playerID: String(player.id),
       }));
-      return { startedAt: this.options.rooms.start(matchID, players) };
+      const startedAt = this.options.rooms.start(matchID, players);
+      this.notifyRoomChange(matchID);
+      return { startedAt };
     });
   }
 
@@ -403,6 +420,7 @@ export class LobbyService {
       delete player.isConnected;
       touchMetadata(metadata);
       await resolveResult(this.options.db.setMetadata(matchID, metadata));
+      this.notifyRoomChange(matchID);
       return { viewerName: session.user.username };
     });
   }
@@ -435,6 +453,7 @@ export class LobbyService {
       player.credentials = playerCredentials;
       touchMetadata(metadata);
       await resolveResult(this.options.db.setMetadata(matchID, metadata));
+      this.notifyRoomChange(matchID);
       return {
         playerID,
         playerCredentials,
@@ -468,7 +487,8 @@ export class LobbyService {
       });
       touchMetadata(metadata);
       await resolveResult(this.options.db.setMetadata(matchID, metadata));
-      return this.publicMatch(session, matchID, metadata);
+      this.notifyRoomChange(matchID);
+      return this.publicMatch(session.user.id, matchID, metadata);
     });
   }
 
@@ -491,7 +511,8 @@ export class LobbyService {
       player.data = data;
       touchMetadata(metadata);
       await resolveResult(this.options.db.setMetadata(matchID, metadata));
-      return this.publicMatch(session, matchID, metadata);
+      this.notifyRoomChange(matchID);
+      return this.publicMatch(session.user.id, matchID, metadata);
     });
   }
 
@@ -514,7 +535,8 @@ export class LobbyService {
       delete player.isConnected;
       touchMetadata(metadata);
       await this.persistOrDeleteEmpty(matchID, metadata);
-      return this.publicMatch(session, matchID, metadata);
+      this.notifyRoomChange(matchID);
+      return this.publicMatch(session.user.id, matchID, metadata);
     });
   }
 
@@ -546,6 +568,7 @@ export class LobbyService {
         userId: session.user.id,
         username: session.user.username,
       });
+      this.notifyRoomChange(matchID);
       return { viewerName: session.user.username };
     });
   }
@@ -562,6 +585,7 @@ export class LobbyService {
         if (nextHost) room.hostUserId = nextHost;
       }
       await this.persistOrDeleteEmpty(matchID, metadata);
+      this.notifyRoomChange(matchID);
       return {};
     });
   }
@@ -669,6 +693,7 @@ export class LobbyService {
       metadata.nextMatchID = nextID;
       touchMetadata(metadata);
       await resolveResult(this.options.db.setMetadata(matchID, metadata));
+      this.notifyRoomChange(matchID);
       return { nextMatchID: nextID };
     });
   }
@@ -693,8 +718,32 @@ export class LobbyService {
       player.data = seatData(session, matchID, input.playerID);
       touchMetadata(metadata);
       await resolveResult(this.options.db.setMetadata(matchID, metadata));
+      this.notifyRoomChange(matchID);
     });
     return {};
+  }
+
+  async issueRoomAccess(
+    session: AuthenticatedSession,
+    matchID: string,
+  ): Promise<{ roomTicket: string; expiresAt: number }> {
+    return withMatchLock(matchID, async () => {
+      const metadata = await fetchMetadata(this.options.db, matchID);
+      const room = this.options.rooms.require(matchID);
+      const player = playerForUser(metadata, session.user.id);
+      if (!player && !room.spectators.has(session.user.id)) {
+        throw new ApiError(403, 'NOT_IN_ROOM');
+      }
+      return this.options.accessTickets.issueRoom(session, matchID);
+    });
+  }
+
+  async roomSnapshotForAccess(
+    access: GameAccessTicketPayload,
+  ): Promise<RoomMatch> {
+    const metadata = await fetchMetadata(this.options.db, access.mid);
+    // Room tickets always carry a user id (enforced by parsePayload).
+    return this.publicMatch(access.uid!, access.mid, metadata);
   }
 
   async expireSpectator(matchID: string, userId: string): Promise<void> {
@@ -722,6 +771,7 @@ export class LobbyService {
         if (nextHost) room.hostUserId = nextHost;
       }
       await this.persistOrDeleteEmpty(matchID, metadataResult.metadata);
+      this.notifyRoomChange(matchID);
     });
   }
 
@@ -742,13 +792,13 @@ export class LobbyService {
   }
 
   private publicMatch(
-    session: AuthenticatedSession,
+    userId: string,
     matchID: string,
     metadata: MatchMetadata,
   ): RoomMatch {
     const room = this.options.rooms.require(matchID);
-    const viewerPlayer = playerForUser(metadata, session.user.id);
-    const viewerIsSpectator = room.spectators.has(session.user.id);
+    const viewerPlayer = playerForUser(metadata, userId);
+    const viewerIsSpectator = room.spectators.has(userId);
     const spectators = this.options.rooms.orderedSpectators(matchID);
     const hostPlayer = playerForUser(metadata, room.hostUserId);
     const hostSpectator = room.spectators.get(room.hostUserId);
@@ -786,7 +836,7 @@ export class LobbyService {
                 data: {
                   avatarUrl: data.avatarUrl,
                   isHost: data.userId === room.hostUserId,
-                  isViewer: data.userId === session.user.id,
+                  isViewer: data.userId === userId,
                 },
               }
             : {}),
@@ -806,7 +856,7 @@ export class LobbyService {
         spectators: spectators.map((spectator) => ({
           username: spectator.username,
           isHost: spectator.userId === room.hostUserId,
-          isViewer: spectator.userId === session.user.id,
+          isViewer: spectator.userId === userId,
         })),
         nextMatch:
           metadata.nextMatchID && nextRoom
@@ -823,12 +873,12 @@ export class LobbyService {
             ? 'spectator'
             : 'none',
         ...(viewerPlayer ? { playerID: String(viewerPlayer.id) } : {}),
-        isHost: room.hostUserId === session.user.id,
-        ...(this.options.rooms.removalReason(matchID, session.user.id)
+        isHost: room.hostUserId === userId,
+        ...(this.options.rooms.removalReason(matchID, userId)
           ? {
               removalReason: this.options.rooms.removalReason(
                 matchID,
-                session.user.id,
+                userId,
               ),
             }
           : {}),

@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SocketIO } from 'boardgame.io/multiplayer';
 import { Client } from 'boardgame.io/react';
 import { useTranslation } from 'react-i18next';
+import { io, type Socket } from 'socket.io-client';
 
 import { SplendorGame } from '../game/SplendorGame.js';
 import type { SplendorState } from '../shared/types/game.js';
 import type { RoomMatch } from '../shared/types/room.js';
-import { jsonRequest, localizedError, useAuth } from './auth.js';
+import { ClientApiError, jsonRequest, localizedError, useAuth } from './auth.js';
 import { AccountMenu } from './components/AccountMenu.js';
 import { GameBoard, type GameBoardProps } from './components/GameBoard.js';
 import { GAME_NAME, GAME_SERVER_URL } from './config.js';
@@ -68,6 +69,7 @@ export default function App() {
     loadMatchSession(getSharedMatchID()),
   );
   const [readyMatch, setReadyMatch] = useState<RoomMatch | null>(null);
+  const [waitingMatch, setWaitingMatch] = useState<RoomMatch | null>(null);
   const [accessTicket, setAccessTicket] = useState<string | null>(null);
   const accessRefreshInFlight = useRef(false);
   const lastAccessRefreshAt = useRef(0);
@@ -78,6 +80,7 @@ export default function App() {
     saveMatchSession(next);
     setSession(next);
     setReadyMatch(null);
+    setWaitingMatch(null);
     setAccessTicket(null);
     setInviteMatchID(next.matchID);
     setAutoEnterInvite(true);
@@ -91,6 +94,7 @@ export default function App() {
       const retainedMatchID = options.keepInvite ? session?.matchID ?? null : null;
       setSession(null);
       setReadyMatch(null);
+      setWaitingMatch(null);
       setAccessTicket(null);
       setInviteMatchID(retainedMatchID);
       setAutoEnterInvite(false);
@@ -100,12 +104,93 @@ export default function App() {
     [session],
   );
 
+  const applyRoomUpdate = useCallback(
+    (next: RoomMatch) => {
+      if (!session) return;
+      if (session.mode === 'spectator' && next.viewer.role !== 'spectator') {
+        clearToLobby({
+          keepInvite: false,
+          notice:
+            next.viewer.removalReason === 'spectating-disabled'
+              ? t('errors.REMOVED_SPECTATING_DISABLED')
+              : t('errors.NOT_A_SPECTATOR'),
+        });
+        return;
+      }
+      setWaitingMatch(next);
+      setReadyMatch((current) => (current ? next : current));
+    },
+    [clearToLobby, session, t],
+  );
+
+  const isRoomGoneError = useCallback((caught: unknown): boolean => {
+    if (caught instanceof ClientApiError) {
+      return (
+        caught.status === 401 ||
+        caught.code === 'MATCH_NOT_FOUND' ||
+        caught.code === 'NOT_A_SPECTATOR' ||
+        caught.code === 'FORBIDDEN'
+      );
+    }
+    // boardgame.io LobbyClient wraps non-2xx responses in LobbyClientError
+    // with the parsed JSON body on `details`.
+    const code = (caught as { details?: { error?: { code?: unknown } } } | null)
+      ?.details?.error?.code;
+    return (
+      code === 'MATCH_NOT_FOUND' ||
+      code === 'NOT_A_SPECTATOR' ||
+      code === 'FORBIDDEN'
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!session || !user) return;
+    let closed = false;
+    let socket: Socket | null = null;
+    const openRoomSocket = async () => {
+      try {
+        const issued = await request<{
+          roomTicket: string;
+          expiresAt: number;
+        }>(
+          `/api/matches/${encodeURIComponent(session.matchID)}/room-ticket`,
+          jsonRequest({}),
+        );
+        if (closed) return;
+        socket = io(`${GAME_SERVER_URL}/room`, {
+          transports: ['websocket'],
+          auth: { roomTicket: issued.roomTicket },
+        });
+        socket.on(
+          'room:update',
+          (payload: { version?: number; room: RoomMatch }) => {
+            if (!closed) applyRoomUpdate(payload.room);
+          },
+        );
+        socket.on('connect_error', () => {
+          if (closed) return;
+          socket?.close();
+          socket = null;
+          window.setTimeout(() => void openRoomSocket(), 500);
+        });
+      } catch {
+        // The channel is best-effort; the low-frequency refresh covers it.
+      }
+    };
+    void openRoomSocket();
+    return () => {
+      closed = true;
+      socket?.close();
+    };
+  }, [applyRoomUpdate, request, session, user]);
+
   useEffect(() => {
     if (loading) return;
     if (!user) {
       if (session) removeMatchSession(session.matchID);
       setSession(null);
       setReadyMatch(null);
+      setWaitingMatch(null);
       setAccessTicket(null);
       return;
     }
@@ -206,10 +291,16 @@ export default function App() {
         lastAccessRefreshAt.current = Date.now();
         setAccessTicket(ticket);
       } catch (caught) {
-        clearToLobby({
-          keepInvite: true,
-          notice: localizedError(caught),
-        });
+        if (
+          isRoomGoneError(caught) ||
+          (caught instanceof ClientApiError &&
+            caught.code === 'SEAT_CREDENTIAL_INVALID')
+        ) {
+          clearToLobby({
+            keepInvite: true,
+            notice: localizedError(caught),
+          });
+        }
       } finally {
         accessRefreshInFlight.current = false;
       }
@@ -260,11 +351,24 @@ export default function App() {
         }
         setReadyMatch(next);
       } catch (caught) {
-        clearToLobby({ keepInvite: true, notice: localizedError(caught) });
+        if (isRoomGoneError(caught)) {
+          clearToLobby({ keepInvite: true, notice: localizedError(caught) });
+        }
       }
     };
-    const timer = window.setInterval(() => void refreshRoom(), 5_000);
-    return () => window.clearInterval(timer);
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void refreshRoom();
+    };
+    const timer = window.setInterval(() => void refreshRoom(), 60_000);
+    window.addEventListener('focus', refreshIfVisible);
+    window.addEventListener('online', refreshIfVisible);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshIfVisible);
+      window.removeEventListener('online', refreshIfVisible);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
   }, [clearToLobby, lobby, readyMatch?.matchID, session, t]);
 
   const playAgain = useCallback(async () => {
@@ -342,6 +446,7 @@ export default function App() {
       <WaitingRoom
         lobby={lobby}
         session={session}
+        liveMatch={waitingMatch}
         onSession={acceptSession}
         onReady={enterStartedMatch}
         onLeave={leaveWaitingRoom}

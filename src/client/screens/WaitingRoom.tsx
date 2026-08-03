@@ -14,6 +14,7 @@ import { matchShareURL, type MatchSession } from '../session.js';
 interface WaitingRoomProps {
   lobby: AuthenticatedLobbyClient;
   session: MatchSession;
+  liveMatch?: RoomMatch | null;
   onSession: (session: MatchSession) => void;
   onReady: (match: RoomMatch) => Promise<void>;
   onLeave: () => Promise<void>;
@@ -23,6 +24,7 @@ interface WaitingRoomProps {
 export function WaitingRoom({
   lobby,
   session,
+  liveMatch,
   onSession,
   onReady,
   onLeave,
@@ -62,21 +64,22 @@ export function WaitingRoom({
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 1500);
+    const timer = window.setInterval(() => void refresh(), 60_000);
     return () => window.clearInterval(timer);
   }, [refresh]);
 
   useEffect(() => {
-    if (session.mode !== 'spectator' || match?.room.startedAt !== null) return;
-    const heartbeat = () =>
-      request<{}>(
-        `/api/matches/${encodeURIComponent(session.matchID)}/spectators/heartbeat`,
-        { method: 'POST' },
-      ).catch((caught) => setError(localizedError(caught)));
-    void heartbeat();
-    const timer = window.setInterval(() => void heartbeat(), 5_000);
-    return () => window.clearInterval(timer);
-  }, [match?.room.startedAt, request, session]);
+    if (!liveMatch) return;
+    setMatch(liveMatch);
+    setError('');
+    if (liveMatch.room.startedAt !== null && !enteringRef.current) {
+      enteringRef.current = true;
+      onReady(liveMatch).catch((caught) => {
+        enteringRef.current = false;
+        setError(localizedError(caught));
+      });
+    }
+  }, [liveMatch, onReady]);
 
   const occupied = match?.players.filter((player) => player.name).length ?? 0;
   const seats = match?.players.length ?? 0;

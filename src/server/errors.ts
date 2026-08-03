@@ -15,6 +15,7 @@ export type ApiErrorCode =
   | 'MATCH_NOT_FOUND'
   | 'MATCH_NOT_STARTED'
   | 'NOT_A_SPECTATOR'
+  | 'NOT_IN_ROOM'
   | 'NOT_ROOM_HOST'
   | 'ORIGIN_INVALID'
   | 'RATE_LIMITED'
