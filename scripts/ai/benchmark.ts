@@ -78,11 +78,13 @@ const main = async (): Promise<void> => {
   if (players.some((count) => ![2, 3, 4].includes(count))) {
     throw new Error('--players must be 2,3 and/or 4.');
   }
-  const candidateModel = parseModel(
-    JSON.parse(await readFile(modelPath, 'utf8')),
-  );
+  const rawCandidate = JSON.parse(
+    await readFile(modelPath, 'utf8'),
+  ) as { expertExtras?: Record<string, number> };
+  const candidateModel = parseModel(rawCandidate);
   const candidateWeights = {
     ...weightsFromModel(candidateModel),
+    ...(rawCandidate.expertExtras ?? {}),
   } as Record<string, number>;
 
   let baselineWeights: Record<string, number> | undefined;

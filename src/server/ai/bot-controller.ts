@@ -23,6 +23,11 @@ import {
 import { computeHardDecision } from '../../shared/ai/search/beam.js';
 import { computeExpertDecision } from '../../shared/ai/search/micro-mcts.js';
 import { createObservation } from '../../shared/ai/observation.js';
+import {
+  seedMemoryFromObservation,
+  updateMemory,
+  type ExpertMemorySnapshot,
+} from '../../shared/ai/memory.js';
 import { createSeededRNG } from '../../shared/ai/seeded-rng.js';
 import type {
   BotDifficulty,
@@ -71,6 +76,7 @@ export class BotController {
   private lastStateID = -1;
   private thinking = false;
   private timer?: ReturnType<typeof setTimeout>;
+  private memory?: ExpertMemorySnapshot;
 
   constructor(private readonly options: BotControllerOptions) {}
 
@@ -107,6 +113,15 @@ export class BotController {
     this.lastStateID = state._stateID;
 
     const G = state.G as SplendorState;
+    const viewCtx: BoardContextView = {
+      currentPlayer: state.ctx.currentPlayer,
+      playOrder: state.ctx.playOrder,
+      playOrderPos: state.ctx.playOrderPos,
+    };
+    const memoryObservation = createObservation(G, this.options.playerID, viewCtx);
+    this.memory = this.memory
+      ? updateMemory(this.memory, memoryObservation)
+      : seedMemoryFromObservation(memoryObservation);
     if (G.result !== null || state.ctx.gameover !== undefined) {
       this.stop();
       return;
@@ -199,8 +214,8 @@ export class BotController {
       this.options.difficulty === 'expert' && this.options.expertEnabled;
     const budget = {
       deadlineEpochMs:
-        performance.now() + (expertMode ? 120 : this.options.hardMaxMs),
-      maxNodes: 800,
+        performance.now() + (expertMode ? 180 : this.options.hardMaxMs),
+      maxNodes: expertMode ? 1600 : 800,
       beamWidth: 5,
       maxDeterminizations: 1,
       maxSimulations: 0,
@@ -213,6 +228,7 @@ export class BotController {
           seed,
           weights: this.options.weights,
           budget,
+          memory: this.memory,
         };
         const decision = expertMode
           ? await this.options.pool.requestExpertDecision(input, 'live')
@@ -229,6 +245,7 @@ export class BotController {
         seed,
         weights: this.options.weights,
         budget,
+        memory: this.memory,
       };
       const decision = expertMode
         ? computeExpertDecision(input)

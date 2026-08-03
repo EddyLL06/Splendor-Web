@@ -11,6 +11,11 @@ import {
 } from '../../../src/shared/ai/policy.js';
 import type { BotDecision } from '../../../src/shared/ai/types.js';
 import { createObservation, type AIObservation } from '../../../src/shared/ai/observation.js';
+import {
+  seedMemoryFromObservation,
+  updateMemory,
+  type ExpertMemorySnapshot,
+} from '../../../src/shared/ai/memory.js';
 import { createSeededRNG } from '../../../src/shared/ai/seeded-rng.js';
 import {
   applySimulationDiscard,
@@ -101,6 +106,8 @@ export const runGame = (
       agentOrder[seat % agentOrder.length],
     ]),
   ) as Record<PlayerID, AgentPolicyID>;
+  let memory: ExpertMemorySnapshot | undefined;
+  let memorySeeded = false;
   const outcome: GameOutcome = {
     index,
     seed,
@@ -128,6 +135,12 @@ export const runGame = (
     const agent = agentsBySeat[playerID];
     const playerView = createPlayerView(sim.G, playerID);
     const observation = createObservation(playerView, playerID, ctxOf(sim));
+    if (!memorySeeded) {
+      memory = seedMemoryFromObservation(observation);
+      memorySeeded = true;
+    } else {
+      memory = updateMemory(memory!, observation);
+    }
     const decisionSeed = `${seed}:${index}:${actionIndex}`;
     const startedAt = performance.now();
     let decision: BotDecision;
@@ -136,6 +149,7 @@ export const runGame = (
         policy: agent,
         seed: decisionSeed,
         weights: weightsByAgent[agent],
+        memory,
       });
     } catch (caught) {
       if (caught instanceof NoLegalActionError) {

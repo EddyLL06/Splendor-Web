@@ -50,11 +50,13 @@ const main = async (): Promise<void> => {
   const maxActions = Number(values.get('max-actions') ?? '3000');
   if (!candidatePath) throw new Error('--candidate is required.');
 
-  const candidateModel = parseModel(
-    JSON.parse(await readFile(candidatePath, 'utf8')),
-  );
+  const rawCandidate = JSON.parse(
+    await readFile(candidatePath, 'utf8'),
+  ) as { expertExtras?: Record<string, number> };
+  const candidateModel = parseModel(rawCandidate);
   const candidateWeights = {
     ...weightsFromModel(candidateModel),
+    ...(rawCandidate.expertExtras ?? {}),
   } as Record<string, number>;
   let productionWeights: Record<string, number> | undefined;
   let productionAgent: AgentPolicyID = 'uniform-random-v1';

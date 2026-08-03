@@ -12,6 +12,7 @@ import type { HardDecisionInput } from '../../shared/ai/search/beam.js';
 import { computeHardDecision } from '../../shared/ai/search/beam.js';
 import { computeExpertDecision } from '../../shared/ai/search/micro-mcts.js';
 import type { BotDecision } from '../../shared/ai/types.js';
+import type { ExpertMemorySnapshot } from '../../shared/ai/memory.js';
 import type { AiMetrics } from './metrics.js';
 
 interface QueuedJob {
@@ -74,7 +75,7 @@ export class AiWorkerPool {
   }
 
   async requestExpertDecision(
-    input: HardDecisionInput,
+    input: HardDecisionInput & { memory?: ExpertMemorySnapshot },
     priority: 'live' | 'background' = 'live',
   ): Promise<BotDecision> {
     return this.request(input, 'expert', priority);

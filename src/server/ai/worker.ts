@@ -8,10 +8,15 @@ import { parentPort } from 'node:worker_threads';
 import { computeHardDecision } from '../../shared/ai/search/beam.js';
 import { computeExpertDecision } from '../../shared/ai/search/micro-mcts.js';
 import type { HardDecisionInput } from '../../shared/ai/search/beam.js';
+import type { ExpertMemorySnapshot } from '../../shared/ai/memory.js';
 
 parentPort?.on(
   'message',
-  (message: { id: number; mode?: 'hard' | 'expert'; input: HardDecisionInput }) => {
+  (message: {
+    id: number;
+    mode?: 'hard' | 'expert';
+    input: HardDecisionInput & { memory?: ExpertMemorySnapshot };
+  }) => {
   try {
     const decision =
       message.mode === 'expert'
