@@ -42,7 +42,7 @@ describe('spectator capacity and disconnect grace', () => {
 });
 
 describe('player connection tolerance and abandonment', () => {
-  it('tracks duplicate tabs, tolerates short drops, cancels stale timers, and expires at five minutes', async () => {
+  it('tracks duplicate tabs, tolerates short drops, cancels stale timers, and expires at three minutes', async () => {
     vi.useFakeTimers();
     let now = 1_000;
     const rooms = new RoomRegistry(() => now);

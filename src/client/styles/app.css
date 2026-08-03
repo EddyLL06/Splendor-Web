@@ -942,6 +942,21 @@ h2 {
   white-space: nowrap;
 }
 
+.player-heading .player-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.player-heading .player-name-row strong {
+  min-width: 0;
+}
+
+.player-heading .player-name-row .bot-difficulty-badge {
+  flex: 0 0 auto;
+}
+
 .player-heading > div:first-child span {
   color: var(--muted);
   font-size: 0.58rem;
@@ -2144,6 +2159,17 @@ h2 {
   height: 29px;
   object-fit: cover;
   border-radius: 50%;
+}
+
+.player-avatar.bot-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .profile-modal {

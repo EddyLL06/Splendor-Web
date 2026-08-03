@@ -4,6 +4,7 @@ import supertest from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { SplendorGame } from '../src/game/SplendorGame.js';
+import { PLAYER_ABANDON_TIMEOUT_MS } from '../src/server/multiplayer/room-registry.js';
 import {
   createTestApplication,
   mutate,
@@ -326,7 +327,7 @@ describe('server-owned room lifecycle and role changes', () => {
       .expect(200, { viewerName: carol.username });
   });
 
-  it('publishes tolerant player connection status and destroys a match after five minutes offline', async () => {
+  it('publishes tolerant player connection status and destroys a match after three minutes offline', async () => {
     const matchID = await createMatch(alice);
     await join(alice, matchID, '0');
     await join(bob, matchID, '1');
@@ -352,7 +353,7 @@ describe('server-owned room lifecycle and role changes', () => {
       ?.players.get('0')?.disconnectedAt;
     expect(disconnectedAt).toEqual(expect.any(Number));
     const now = vi.spyOn(Date, 'now').mockReturnValue(
-      disconnectedAt! + 5 * 60_000,
+      disconnectedAt! + PLAYER_ABANDON_TIMEOUT_MS,
     );
     try {
       const offline = await bob.agent.get(`${gamePath}/${matchID}`).expect(200);

@@ -12,9 +12,13 @@ import type { BoardProps } from 'boardgame.io/react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 
-import { NORMAL_COLORS, TOKEN_COLORS } from '../../shared/constants/colors.js';
+import {
+  emptyTokenCounts,
+  NORMAL_COLORS,
+  TOKEN_COLORS,
+} from '../../shared/constants/colors.js';
 import { requireCard, requireNoble } from '../../shared/data/gameData.js';
-import { applyMainAction, suggestedDiscard } from '../../shared/rules/engine.js';
+import { applyMainAction } from '../../shared/rules/engine.js';
 import {
   analyzePayment,
   getBonuses,
@@ -274,18 +278,24 @@ function PlayerSummary({
       data-animation-key={`player-${id}`}
     >
       <div className="player-heading">
-        {avatarUrl && <img className="player-avatar" src={avatarUrl} alt="" />}
+        {avatarUrl ? (
+          <img className="player-avatar" src={avatarUrl} alt="" />
+        ) : difficulty ? (
+          <span className="player-avatar bot-avatar" aria-hidden="true">X</span>
+        ) : null}
         <div>
-          <strong>{name}</strong>
+          <div className="player-name-row">
+            <strong>{name}</strong>
+            {difficulty && (
+              <span className="bot-difficulty-badge">
+                {t('waiting.botBadge')} · {t(`waiting.bot${difficulty[0].toUpperCase()}${difficulty.slice(1)}`)}
+              </span>
+            )}
+          </div>
           <span>
             {t('game.seat', { number: Number(id) + 1 })}
             {isLocal ? ` · ${t('common.you')}` : ''}
           </span>
-          {difficulty && (
-            <span className="bot-difficulty-badge">
-              {t('waiting.botBadge')} · {t(`waiting.bot${difficulty[0].toUpperCase()}${difficulty.slice(1)}`)}
-            </span>
-          )}
           <span
             className={`player-connection-status connection-${connectionStatus}`}
             aria-label={t('game.connectionStatus', {
@@ -727,7 +737,7 @@ export function GameBoard(props: GameBoardProps) {
       discardKeyRef.current = key;
       setDiscardUi((current) => reduceDiscardUi(current, {
         type: 'start',
-        returned: suggestedDiscard(G, localID),
+        returned: emptyTokenCounts(),
       }));
     } else if (!key) {
       discardKeyRef.current = null;
