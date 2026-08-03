@@ -218,9 +218,14 @@ export class LobbyService {
     );
     const matches: RoomMatch[] = [];
     for (const matchID of ids) {
-      const metadata = await fetchMetadata(this.options.db, matchID);
-      if (!metadata.unlisted) {
-        matches.push(this.publicMatch(session.user.id, matchID, metadata));
+      try {
+        const metadata = await fetchMetadata(this.options.db, matchID);
+        if (!metadata.unlisted) {
+          matches.push(this.publicMatch(session.user.id, matchID, metadata));
+        }
+      } catch (caught) {
+        if (caught instanceof ApiError && caught.status === 404) continue;
+        throw caught;
       }
     }
     return { matches };
