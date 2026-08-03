@@ -1,3 +1,5 @@
+import type { BotDifficulty } from '../ai/types.js';
+
 export const SPECTATOR_CAPACITY = 10;
 
 export type RoomViewerRole = 'player' | 'spectator' | 'none';
@@ -25,6 +27,8 @@ export interface PublicRoomState {
 export interface PublicMatchPlayer {
   id: number;
   name?: string;
+  kind?: 'human' | 'bot';
+  difficulty?: BotDifficulty;
   connectionStatus?: PlayerConnectionStatus;
   data?: {
     avatarUrl?: string;

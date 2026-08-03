@@ -4,6 +4,10 @@ import type { Socket } from 'socket.io';
 
 import type { GameAccessTicketPayload, GameAccessTicketService } from './access-tickets.js';
 import type { SeatMetadata } from './credentials.js';
+import {
+  isBotSeatMetadata,
+  type BotSeatMetadata,
+} from '../ai/bot-seat.js';
 import type { MatchDatabase, MatchMetadata } from './lobby.js';
 import type { RoomRegistry } from './room-registry.js';
 
@@ -25,7 +29,11 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
       tickets: GameAccessTicketService;
     },
   ) {
-    super();
+    // boardgame.io's SocketOpts type marks socket.io ServerOptions as fully
+    // required; only the fields we set are applied at runtime.
+    super({
+      socketOpts: { transports: ['websocket'] } as unknown as import('socket.io').ServerOptions,
+    });
     this.dependencies.rooms.setDeletionHandler((matchID) =>
       this.disconnectMatch(matchID),
     );
@@ -59,9 +67,10 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
           socket.disconnect(true);
           return;
         }
-        const sessionSockets = this.socketsBySession.get(access.sid) ?? new Set();
+        const sessionKey = access.sid ?? `bot:${access.bid}`;
+        const sessionSockets = this.socketsBySession.get(sessionKey) ?? new Set();
         sessionSockets.add(socket);
-        this.socketsBySession.set(access.sid, sessionSockets);
+        this.socketsBySession.set(sessionKey, sessionSockets);
 
         socket.use(async (packet, next) => {
           const refreshed = await this.dependencies.tickets.verify(
@@ -81,13 +90,20 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
               if (refreshed.role === 'spectator') {
                 this.dependencies.rooms.connectSpectator(
                   refreshed.mid,
-                  refreshed.uid,
+                  refreshed.uid!,
+                  socket.id,
+                );
+              } else if (refreshed.role === 'bot') {
+                this.dependencies.rooms.connectBotPlayer(
+                  refreshed.mid,
+                  refreshed.bid!,
+                  refreshed.pid!,
                   socket.id,
                 );
               } else {
                 this.dependencies.rooms.connectPlayer(
                   refreshed.mid,
-                  refreshed.uid,
+                  refreshed.uid!,
                   refreshed.pid!,
                   socket.id,
                 );
@@ -127,11 +143,18 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
               current.pid,
               socket.id,
             );
+          } else if (current?.role === 'bot' && current.pid) {
+            this.dependencies.rooms.disconnectPlayer(
+              current.mid,
+              current.pid,
+              socket.id,
+            );
           }
           if (current) {
-            const sockets = this.socketsBySession.get(current.sid);
+            const sessionKey = current.sid ?? `bot:${current.bid}`;
+            const sockets = this.socketsBySession.get(sessionKey);
             sockets?.delete(socket);
-            if (sockets?.size === 0) this.socketsBySession.delete(current.sid);
+            if (sockets?.size === 0) this.socketsBySession.delete(sessionKey);
           }
         });
       });
@@ -164,8 +187,22 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
   private async isAuthorized(payload: GameAccessTicketPayload): Promise<boolean> {
     const room = this.dependencies.rooms.get(payload.mid);
     if (!room || room.startedAt === null) return false;
+    if (payload.role === 'bot') {
+      const result = await Promise.resolve(
+        this.dependencies.db.fetch(payload.mid, { metadata: true }),
+      );
+      const metadata = result.metadata as MatchMetadata | undefined;
+      const player = payload.pid
+        ? metadata?.players[Number(payload.pid)]
+        : undefined;
+      const data = player?.data as SeatMetadata | BotSeatMetadata | undefined;
+      if (!isBotSeatMetadata(data)) return false;
+      return (
+        data.botId === payload.bid && data.playerId === payload.pid
+      );
+    }
     if (payload.role === 'spectator') {
-      return room.allowSpectators && room.spectators.has(payload.uid);
+      return room.allowSpectators && room.spectators.has(payload.uid!);
     }
     const result = await Promise.resolve(
       this.dependencies.db.fetch(payload.mid, { metadata: true }),
@@ -175,11 +212,11 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
       ? metadata?.players[Number(payload.pid)]
       : undefined;
     const data = player?.data as SeatMetadata | undefined;
-    return Boolean(
-      player &&
-        data?.userId === payload.uid &&
-        data.matchId === payload.mid &&
-        data.playerId === payload.pid,
+    if (!player || !data) return false;
+    return (
+      data.userId === payload.uid &&
+      data.matchId === payload.mid &&
+      data.playerId === payload.pid
     );
   }
 
@@ -198,12 +235,12 @@ export class AuthenticatedSocketIO extends BoardgameSocketIO {
       );
     }
     if (event === 'update') {
-      if (payload.role === 'spectator') return false;
+      if (payload.role !== 'player' && payload.role !== 'bot') return false;
       const [, , matchID, playerID] = args;
       return matchID === payload.mid && playerID === payload.pid;
     }
     if (event === 'chat') {
-      if (payload.role === 'spectator') return false;
+      if (payload.role !== 'player') return false;
       const [matchID, message] = args as [unknown, { sender?: unknown } | undefined];
       return matchID === payload.mid && message?.sender === payload.pid;
     }

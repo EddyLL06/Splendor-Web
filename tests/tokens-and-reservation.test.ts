@@ -54,6 +54,58 @@ describe('token actions', () => {
     ).toBe(false);
   });
 
+  it('falls back to two tokens when only two colors remain in the bank', () => {
+    const state = createTestState();
+    state.bank.white = 0;
+    state.bank.blue = 0;
+    state.bank.green = 0;
+    state.bank.red = 2;
+    state.bank.black = 3;
+
+    const result = applyMainAction(state, '0', '0', {
+      type: 'takeDifferent',
+      colors: ['red', 'black'],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.players['0'].tokens).toMatchObject({
+      red: 1,
+      black: 1,
+    });
+    expect(result.value.bank).toMatchObject({ red: 1, black: 2 });
+    expect(result.value.turnReady).toBe(true);
+  });
+
+  it('keeps the three-token rule while three or more colors remain', () => {
+    const state = createTestState();
+    state.bank.green = 0;
+    expect(
+      applyMainAction(state, '0', '0', {
+        type: 'takeDifferent',
+        colors: ['white', 'blue'],
+      }).ok,
+    ).toBe(false);
+    expect(
+      applyMainAction(state, '0', '0', {
+        type: 'takeDifferent',
+        colors: ['white', 'blue', 'red'],
+      }).ok,
+    ).toBe(true);
+  });
+
+  it('rejects a three-token take when only two colors remain', () => {
+    const state = createTestState();
+    state.bank.white = 0;
+    state.bank.blue = 0;
+    state.bank.green = 0;
+    expect(
+      applyMainAction(state, '0', '0', {
+        type: 'takeDifferent',
+        colors: ['red', 'black', 'white'],
+      }).ok,
+    ).toBe(false);
+  });
+
   it('takes two only when at least four matching tokens remain', () => {
     const state = createTestState();
     const result = applyMainAction(state, '0', '0', {

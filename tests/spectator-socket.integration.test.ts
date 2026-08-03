@@ -103,7 +103,10 @@ describe('authenticated read-only spectator transport', () => {
         multiplayer: SocketIO({
           server,
           socketOpts: input.accessTicket
-            ? { auth: { accessTicket: input.accessTicket } }
+            ? {
+                auth: { accessTicket: input.accessTicket },
+                transports: ['websocket'],
+              }
             : undefined,
         }),
       });

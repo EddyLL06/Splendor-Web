@@ -691,6 +691,57 @@ h2 {
   gap: 12px;
 }
 
+.seat-identity {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.seat-identity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.seat-actions {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.bot-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.bot-difficulty-control {
+  display: grid;
+  gap: 3px;
+}
+
+.bot-difficulty-control > span {
+  color: var(--muted);
+  font-size: 0.56rem;
+}
+
+.bot-difficulty-control select {
+  min-height: 28px;
+  padding: 3px 8px;
+  color: var(--ink);
+  background: #fffdf7;
+  border: 1px solid #d9d4c9;
+  border-radius: 8px;
+  font-size: 0.72rem;
+}
+
+.bot-difficulty-control select:disabled {
+  opacity: 0.55;
+}
+
 .seat-row.seat-filled {
   color: var(--ink);
   background: #f0f5f1;
@@ -923,6 +974,19 @@ h2 {
   color: var(--muted);
   font-size: 0.57rem;
   gap: 4px 9px;
+}
+
+.player-heading > div:first-child span.bot-difficulty-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 1px 6px;
+  border: 1px solid rgba(101, 196, 153, 0.4);
+  border-radius: 999px;
+  color: #2e7d5b;
+  background: rgba(101, 196, 153, 0.12);
+  font-size: 0.52rem;
+  font-weight: 750;
 }
 
 .mini-token-row,

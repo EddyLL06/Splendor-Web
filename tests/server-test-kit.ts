@@ -45,6 +45,8 @@ export const createTestConfig = (root: string, overrides: NodeJS.ProcessEnv = {}
       VERIFICATION_CODE_TTL_MINUTES: '10',
       VERIFICATION_CODE_RESEND_SECONDS: '60',
       VERIFICATION_CODE_MAX_ATTEMPTS: '5',
+      AI_BOT_WORKERS: '0',
+      AI_BOT_ENABLED: 'true',
       ...overrides,
     },
     projectRoot,

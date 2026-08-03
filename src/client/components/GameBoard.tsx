@@ -36,6 +36,7 @@ import type {
   PlayerConnectionStatus,
   PublicRoomState,
 } from '../../shared/types/room.js';
+import type { BotDifficulty } from '../../shared/ai/types.js';
 import { localizedError } from '../auth.js';
 import {
   canShowReservedCardDetails,
@@ -65,6 +66,7 @@ export interface GameBoardProps extends BoardProps<SplendorState> {
   playerNames: Record<string, string>;
   playerAvatars: Record<string, string>;
   playerConnections?: Record<string, PlayerConnectionStatus>;
+  playerDifficulties?: Record<string, BotDifficulty>;
   accountMenu: ReactNode;
   sessionMode: 'player' | 'spectator';
   room: PublicRoomState;
@@ -250,6 +252,7 @@ function PlayerSummary({
   isLocal,
   avatarUrl,
   connectionStatus,
+  difficulty,
 }: {
   state: SplendorState;
   id: string;
@@ -258,6 +261,7 @@ function PlayerSummary({
   isLocal: boolean;
   avatarUrl: string;
   connectionStatus: PlayerConnectionStatus;
+  difficulty?: BotDifficulty;
 }) {
   const { t } = useTranslation();
   const player = state.players[id];
@@ -277,6 +281,11 @@ function PlayerSummary({
             {t('game.seat', { number: Number(id) + 1 })}
             {isLocal ? ` · ${t('common.you')}` : ''}
           </span>
+          {difficulty && (
+            <span className="bot-difficulty-badge">
+              {t('waiting.botBadge')} · {t(`waiting.bot${difficulty[0].toUpperCase()}${difficulty.slice(1)}`)}
+            </span>
+          )}
           <span
             className={`player-connection-status connection-${connectionStatus}`}
             aria-label={t('game.connectionStatus', {
@@ -294,6 +303,7 @@ function PlayerSummary({
         </div>
       </div>
       <div className="player-stats">
+        <span>{t('game.tokens', { count: totalTokens(player.tokens) })}</span>
         <span>{t('game.cards', { count: player.purchasedCardIds.length })}</span>
         <span>{t('game.nobles', { count: player.nobleIds.length })}</span>
         <span>{t('game.reserved', { count: player.reservedCards.length })}</span>
@@ -651,6 +661,7 @@ export function GameBoard(props: GameBoardProps) {
     playerNames,
     playerAvatars,
     playerConnections = {},
+    playerDifficulties = {},
     accountMenu,
     sessionMode,
     room,
@@ -1050,6 +1061,7 @@ export function GameBoard(props: GameBoardProps) {
                 isLocal={localID === id}
                 avatarUrl={playerAvatars[id] ?? ''}
                 connectionStatus={playerConnections[id] ?? 'reconnecting'}
+                difficulty={playerDifficulties?.[id]}
               />
             ))}
           </div>

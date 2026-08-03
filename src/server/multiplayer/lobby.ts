@@ -4,10 +4,18 @@ import type { Server as BoardgameServer, StorageAPI } from 'boardgame.io';
 import { createMatch as createBoardgameMatch } from 'boardgame.io/dist/cjs/internal.js';
 
 import { SplendorGame } from '../../game/SplendorGame.js';
+import {
+  botSeatName,
+  isBotSeatMetadata,
+  toPublicBotSeat,
+  type BotSeatMetadata,
+} from '../ai/bot-seat.js';
 import { SPECTATOR_CAPACITY, type RoomMatch } from '../../shared/types/room.js';
+import type { BotDifficulty } from '../../shared/ai/types.js';
 import type { AuthenticatedSession } from '../auth/session.js';
 import { ApiError, invalidInput } from '../errors.js';
 import {
+  botSeatSchema,
   createMatchSchema,
   credentialSchema,
   gameAccessSchema,
@@ -18,6 +26,7 @@ import {
   switchToPlayerSchema,
 } from '../validation/auth.js';
 import type { GameAccessTicketService } from './access-tickets.js';
+import type { BotTicketService } from '../ai/bot-ticket.js';
 import type { SeatCredentialService, SeatMetadata } from './credentials.js';
 import {
   RoomRegistry,
@@ -86,6 +95,22 @@ const seatData = (
   avatarUrl: session.user.avatarUrl,
 });
 
+const botSeatData = (
+  botId: string,
+  matchId: string,
+  playerId: string,
+  difficulty: BotDifficulty,
+): BotSeatMetadata => ({
+  kind: 'bot',
+  botId,
+  matchId,
+  playerId,
+  difficulty,
+  modelVersion: 'ai-kernel-v0.1.0',
+});
+
+const BOT_MATCH_CREDENTIAL_TTL_MS = 12 * 60 * 60_000;
+
 const findOpenSeat = (metadata: MatchMetadata): string | undefined =>
   Object.values(metadata.players)
     .map((player) => String(player.id))
@@ -93,7 +118,10 @@ const findOpenSeat = (metadata: MatchMetadata): string | undefined =>
 
 const playerForUser = (metadata: MatchMetadata, userId: string) =>
   Object.values(metadata.players).find(
-    (player) => (player.data as SeatMetadata | undefined)?.userId === userId,
+    (player) => {
+      const data = player.data as SeatMetadata | BotSeatMetadata | undefined;
+      return !isBotSeatMetadata(data) && data?.userId === userId;
+    },
   );
 
 const occupiedPlayers = (metadata: MatchMetadata) =>
@@ -111,6 +139,7 @@ const assertSeatCredential = async (
   const player = metadata.players[Number(playerID)];
   if (
     !player ||
+    isBotSeatMetadata(player.data) ||
     (player.data as SeatMetadata | undefined)?.userId !== session.user.id ||
     !(await credentials.authenticate(supplied, player))
   ) {
@@ -121,6 +150,7 @@ const assertSeatCredential = async (
 export interface LobbyServiceOptions {
   db: MatchDatabase;
   credentials: SeatCredentialService;
+  botCredentials: BotTicketService;
   rooms: RoomRegistry;
   accessTickets: GameAccessTicketService;
 }
@@ -299,7 +329,13 @@ export class LobbyService {
         }
         if (room.spectators.has(room.hostUserId)) {
           const nextHost = occupiedPlayers(metadata)
-            .map((player) => (player.data as SeatMetadata | undefined)?.userId)
+            .map((player) => {
+              const data = player.data as
+                | SeatMetadata
+                | BotSeatMetadata
+                | undefined;
+              return isBotSeatMetadata(data) ? undefined : data?.userId;
+            })
             .find((userId): userId is string => Boolean(userId));
           if (nextHost) room.hostUserId = nextHost;
         }
@@ -327,7 +363,9 @@ export class LobbyService {
         throw new ApiError(409, 'PLAYER_SEATS_NOT_FULL');
       }
       const players = occupiedPlayers(metadata).map((player) => ({
-        userId: (player.data as SeatMetadata).userId,
+        ...(isBotSeatMetadata(player.data)
+          ? { botId: player.data.botId }
+          : { userId: (player.data as SeatMetadata).userId }),
         playerID: String(player.id),
       }));
       return { startedAt: this.options.rooms.start(matchID, players) };
@@ -402,6 +440,81 @@ export class LobbyService {
         playerCredentials,
         playerName: session.user.username,
       };
+    });
+  }
+
+  async addBot(
+    session: AuthenticatedSession,
+    matchID: string,
+    body: unknown,
+  ): Promise<RoomMatch> {
+    const input = parseBody(botSeatSchema, body);
+    return withMatchLock(matchID, async () => {
+      const metadata = await fetchMetadata(this.options.db, matchID);
+      const room = this.options.rooms.require(matchID);
+      this.assertHost(room.hostUserId, session.user.id);
+      if (room.startedAt !== null) throw new ApiError(409, 'MATCH_ALREADY_STARTED');
+      const player = metadata.players[Number(input.playerID)];
+      if (!player) throw new ApiError(404, 'MATCH_NOT_FOUND');
+      if (player.name) throw new ApiError(409, 'SEAT_ALREADY_CLAIMED');
+      const botId = `bot-${randomBytes(9).toString('base64url')}`;
+      player.name = botSeatName(input.playerID);
+      player.data = botSeatData(botId, matchID, input.playerID, input.difficulty);
+      player.credentials = this.options.botCredentials.issueBotCredential({
+        botId,
+        matchId: matchID,
+        playerId: input.playerID,
+        ttlMs: BOT_MATCH_CREDENTIAL_TTL_MS,
+      });
+      touchMetadata(metadata);
+      await resolveResult(this.options.db.setMetadata(matchID, metadata));
+      return this.publicMatch(session, matchID, metadata);
+    });
+  }
+
+  async updateBot(
+    session: AuthenticatedSession,
+    matchID: string,
+    playerID: string,
+    body: unknown,
+  ): Promise<RoomMatch> {
+    const input = parseBody(botSeatSchema, body);
+    return withMatchLock(matchID, async () => {
+      const metadata = await fetchMetadata(this.options.db, matchID);
+      const room = this.options.rooms.require(matchID);
+      this.assertHost(room.hostUserId, session.user.id);
+      if (room.startedAt !== null) throw new ApiError(409, 'MATCH_ALREADY_STARTED');
+      const player = metadata.players[Number(playerID)];
+      const data = player?.data as SeatMetadata | BotSeatMetadata | undefined;
+      if (!isBotSeatMetadata(data)) throw new ApiError(409, 'SEAT_IS_NOT_BOT');
+      data.difficulty = input.difficulty;
+      player.data = data;
+      touchMetadata(metadata);
+      await resolveResult(this.options.db.setMetadata(matchID, metadata));
+      return this.publicMatch(session, matchID, metadata);
+    });
+  }
+
+  async removeBot(
+    session: AuthenticatedSession,
+    matchID: string,
+    playerID: string,
+  ): Promise<RoomMatch> {
+    return withMatchLock(matchID, async () => {
+      const metadata = await fetchMetadata(this.options.db, matchID);
+      const room = this.options.rooms.require(matchID);
+      this.assertHost(room.hostUserId, session.user.id);
+      if (room.startedAt !== null) throw new ApiError(409, 'MATCH_ALREADY_STARTED');
+      const player = metadata.players[Number(playerID)];
+      const data = player?.data as SeatMetadata | BotSeatMetadata | undefined;
+      if (!isBotSeatMetadata(data)) throw new ApiError(409, 'SEAT_IS_NOT_BOT');
+      delete player.name;
+      delete player.credentials;
+      delete player.data;
+      delete player.isConnected;
+      touchMetadata(metadata);
+      await this.persistOrDeleteEmpty(matchID, metadata);
+      return this.publicMatch(session, matchID, metadata);
     });
   }
 
@@ -537,6 +650,22 @@ export class LobbyService {
         await resolveResult(this.options.db.wipe(nextID));
         throw caught;
       }
+      const nextMetadata = await fetchMetadata(this.options.db, nextID);
+      for (const [seatID, player] of Object.entries(metadata.players)) {
+        const data = player.data as SeatMetadata | BotSeatMetadata | undefined;
+        if (!isBotSeatMetadata(data)) continue;
+        const nextPlayer = nextMetadata.players[Number(seatID)];
+        if (!nextPlayer) continue;
+        nextPlayer.name = botSeatName(seatID);
+        nextPlayer.data = botSeatData(data.botId, nextID, seatID, data.difficulty);
+        nextPlayer.credentials = this.options.botCredentials.issueBotCredential({
+          botId: data.botId,
+          matchId: nextID,
+          playerId: seatID,
+          ttlMs: BOT_MATCH_CREDENTIAL_TTL_MS,
+        });
+      }
+      await resolveResult(this.options.db.setMetadata(nextID, nextMetadata));
       metadata.nextMatchID = nextID;
       touchMetadata(metadata);
       await resolveResult(this.options.db.setMetadata(matchID, metadata));
@@ -630,11 +759,21 @@ export class LobbyService {
       matchID,
       gameName: metadata.gameName,
       players: Object.values(metadata.players).map((player) => {
-        const data = player.data as SeatMetadata | undefined;
+        const data = player.data as SeatMetadata | BotSeatMetadata | undefined;
+        const bot = isBotSeatMetadata(data);
         return {
           id: Number(player.id),
           ...(player.name ? { name: player.name } : {}),
-          ...(room.startedAt !== null && data
+          ...(bot
+            ? {
+                kind: 'bot',
+                difficulty: data.difficulty,
+                ...(room.startedAt !== null
+                  ? { connectionStatus: 'online' as const }
+                  : {}),
+              }
+            : {}),
+          ...(!bot && room.startedAt !== null && data
             ? {
                 connectionStatus: this.options.rooms.playerConnectionStatus(
                   matchID,
@@ -642,7 +781,7 @@ export class LobbyService {
                 ),
               }
             : {}),
-          ...(data
+          ...(!bot && data
             ? {
                 data: {
                   avatarUrl: data.avatarUrl,
@@ -717,7 +856,10 @@ export class LobbyService {
 
   private nextHost(metadata: MatchMetadata, matchID: string): string | undefined {
     const playerHost = occupiedPlayers(metadata)
-      .map((player) => (player.data as SeatMetadata | undefined)?.userId)
+      .map((player) => {
+        const data = player.data as SeatMetadata | BotSeatMetadata | undefined;
+        return isBotSeatMetadata(data) ? undefined : data?.userId;
+      })
       .find((userId): userId is string => Boolean(userId));
     return (
       playerHost ?? this.options.rooms.orderedSpectators(matchID)[0]?.userId

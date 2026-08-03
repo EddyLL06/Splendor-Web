@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { availableParallelism, homedir } from 'node:os';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { loadEnvFile } from 'node:process';
 
@@ -30,6 +30,11 @@ export interface AppConfig {
   verificationCodeResendSeconds: number;
   verificationCodeMaxAttempts: number;
   defaultLocale: Locale;
+  aiBotEnabled: boolean;
+  aiBotWorkers: number;
+  aiBotQueueLimit: number;
+  aiBotHardMaxMs: number;
+  aiBotExpertEnabled: boolean;
 }
 
 const parseInteger = (
@@ -45,6 +50,31 @@ const parseInteger = (
     throw new Error(`${key} must be an integer from ${minimum} to ${maximum}.`);
   }
   return value;
+};
+
+const parseAiBotWorkers = (env: NodeJS.ProcessEnv): number => {
+  const raw = env.AI_BOT_WORKERS?.trim() ?? 'auto';
+  if (raw === 'auto') {
+    const logical = availableParallelism();
+    return Math.max(1, Math.min(4, logical <= 2 ? 1 : 2));
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 0 || value > 4) {
+    throw new Error('AI_BOT_WORKERS must be auto or an integer from 0 to 4.');
+  }
+  return value;
+};
+
+const parseBoolean = (
+  env: NodeJS.ProcessEnv,
+  key: string,
+  fallback: boolean,
+): boolean => {
+  const raw = env[key]?.trim();
+  if (raw === undefined || raw === '') return fallback;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  throw new Error(`${key} must be true or false.`);
 };
 
 const resolvePath = (
@@ -234,6 +264,11 @@ export const createConfig = (
       1,
       20,
     ),
+    aiBotEnabled: parseBoolean(env, 'AI_BOT_ENABLED', true),
+    aiBotWorkers: parseAiBotWorkers(env),
+    aiBotQueueLimit: parseInteger(env, 'AI_BOT_QUEUE_LIMIT', 256, 1, 10_000),
+    aiBotHardMaxMs: parseInteger(env, 'AI_BOT_HARD_MAX_MS', 80, 1, 1000),
+    aiBotExpertEnabled: parseBoolean(env, 'AI_BOT_EXPERT_ENABLED', false),
     defaultLocale: 'en',
   };
 };

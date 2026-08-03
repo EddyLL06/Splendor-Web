@@ -94,7 +94,7 @@ describe('Socket.IO account-session enforcement', () => {
         credentials,
         multiplayer: SocketIO({
           server,
-          socketOpts: { auth: { accessTicket } },
+          socketOpts: { auth: { accessTicket }, transports: ['websocket'] },
         }),
       });
       clients.push(client);
