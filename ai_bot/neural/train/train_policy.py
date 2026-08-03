@@ -19,7 +19,7 @@ from torch import nn
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from model.net import PolicyValueNet  # noqa: E402
+from model.net import PolicyValueNet, PolicyValueNetAttention  # noqa: E402
 from train.dataset import (  # noqa: E402
     load_positions,
     make_batch,
@@ -79,6 +79,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--init", default=None, help="Optional checkpoint to fine-tune from")
     parser.add_argument("--value-weight", type=float, default=1.0)
+    parser.add_argument("--arch", default="deep-sets", choices=["deep-sets", "attention"])
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -99,7 +100,12 @@ def main() -> None:
         precompute_actions(positions)
     )
 
-    net = PolicyValueNet()
+    net = (
+        PolicyValueNetAttention()
+        if args.arch == "attention"
+        else PolicyValueNet()
+    )
+    print(f"architecture: {args.arch} ({sum(p.numel() for p in net.parameters())} params)")
     if args.init:
         net.load_state_dict(torch.load(args.init, map_location="cpu"))
         print(f"fine-tuning from {args.init}")
@@ -187,6 +193,7 @@ def main() -> None:
     )
     config = {
         "architecture": "deep-sets-policy-value-v1",
+        "arch": args.arch,
         "obs_dim": 462,
         "action_dim": 43,
         "epochs": args.epochs,

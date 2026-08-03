@@ -11,7 +11,7 @@ import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from model.net import PolicyValueNet  # noqa: E402
+from model.net import PolicyValueNet, PolicyValueNetAttention  # noqa: E402
 
 
 def main() -> None:
@@ -19,11 +19,16 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--arch", default="deep-sets", choices=["deep-sets", "attention"])
     args = parser.parse_args()
 
     with open(args.config, "r", encoding="utf-8") as handle:
         config = json.load(handle)
-    net = PolicyValueNet()
+    net = (
+        PolicyValueNetAttention()
+        if args.arch == "attention"
+        else PolicyValueNet()
+    )
     net.load_state_dict(torch.load(args.checkpoint, map_location="cpu"))
     net.eval()
 
