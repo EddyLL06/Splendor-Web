@@ -10,7 +10,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { cpus, platform, release } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { NeuralPolicy } from '../../../src/shared/ai/neural/inference.js';
+import {
+  EnsemblePolicy,
+  NeuralPolicy,
+  type NeuralPolicyLike,
+} from '../../../src/shared/ai/neural/inference.js';
 import { computeNeuralPuctDecision } from '../../../src/shared/ai/search/neural-puct.js';
 import { createObservation } from '../../../src/shared/ai/observation.js';
 import { chooseBotMove } from '../../../src/shared/ai/policy.js';
@@ -58,7 +62,7 @@ const playGame = async (
   numPlayers: number,
   neuralSeat: number,
   seed: string,
-  neural: NeuralPolicy,
+  neural: NeuralPolicyLike,
   weights: Record<string, number>,
   maxActions: number,
   search: boolean,
@@ -118,7 +122,7 @@ const playGame = async (
             neural,
             mode,
             budget: {
-              deadlineEpochMs: performance.now() + 300,
+              deadlineEpochMs: performance.now() + 500,
               simsPerDeterminization: sims,
               determinizations,
             },
@@ -186,7 +190,9 @@ const main = async (): Promise<void> => {
     JSON.parse(await readFile(weightsPath, 'utf8')),
   );
   const weights = { ...weightsFromModel(weightsModel) } as Record<string, number>;
-  const neural = await NeuralPolicy.load(resolve(modelPath));
+  const neural = modelPath.includes(',')
+    ? await EnsemblePolicy.load(modelPath.split(',').map((path) => resolve(path.trim())))
+    : await NeuralPolicy.load(resolve(modelPath));
   await mkdir(output, { recursive: true });
   let commit = 'unknown';
   try {

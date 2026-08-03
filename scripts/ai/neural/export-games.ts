@@ -26,6 +26,7 @@ import { createObservation } from '../../../src/shared/ai/observation.js';
 import { createPlayerView } from '../../../src/game/playerView.js';
 import { createStandings } from '../../../src/shared/rules/selectors.js';
 import { parseModel, weightsFromModel } from '../../../src/shared/ai/models/schema.js';
+import { NoLegalActionError } from '../../../src/shared/ai/errors.js';
 import { NeuralPolicy } from '../../../src/shared/ai/neural/inference.js';
 import { computeNeuralPuctDecision } from '../../../src/shared/ai/search/neural-puct.js';
 import type {
@@ -125,6 +126,7 @@ const main = async (): Promise<void> => {
       actor: string;
       entry: string;
     }> = [];
+    let gameAborted = false;
     let guard = 0;
     while (sim.G.result === null && guard < maxActions) {
       guard += 1;
@@ -143,34 +145,63 @@ const main = async (): Promise<void> => {
       const decisionSeed = `${seed}:${gameIndex}:${guard}`;
       let visitTarget: Record<string, number> | undefined;
       let searchValue: number | undefined;
-      const decision =
-        agentsBySeat[playerID] === 'neural-puct-v1' && neural
-          ? await computeNeuralPuctDecision({
-              observation,
-              ctx,
-              seed: decisionSeed,
-              weights,
-              neural,
-              budget: {
-                deadlineEpochMs: performance.now() + 200,
-                simsPerDeterminization: 96,
-                determinizations: 2,
-              },
-              // Bot-tree search is the current strongest teacher; the
-              // alternating search still needs more value training.
-              mode: 'bot-tree',
-              onDebug: (rows) => {
-                visitTarget = Object.fromEntries(
-                  rows.map((row) => [row.key, row.visits]),
-                );
-                searchValue = rows.reduce((best, row) => Math.max(best, row.q), -1);
-              },
-            })
-          : chooseBotMove(observation, ctx, {
-              policy: agentsBySeat[playerID] as AgentPolicyID,
-              seed: decisionSeed,
-              weights,
-            });
+      let decision: BotDecision;
+      try {
+        decision =
+          agentsBySeat[playerID] === 'neural-puct-v1' && neural
+            ? await computeNeuralPuctDecision({
+                observation,
+                ctx,
+                seed: decisionSeed,
+                weights,
+                neural,
+                budget: {
+                  deadlineEpochMs: performance.now() + 500,
+                  simsPerDeterminization: 96,
+                  determinizations: 2,
+                },
+                // Bot-tree search is the current strongest teacher; the
+                // alternating search still needs more value training.
+                mode: 'bot-tree',
+                onDebug: (rows) => {
+                  visitTarget = Object.fromEntries(
+                    rows.map((row) => [row.key, row.visits]),
+                  );
+                  searchValue = rows.reduce(
+                    (best, row) => Math.max(best, row.q),
+                    -1,
+                  );
+                },
+              })
+            : chooseBotMove(observation, ctx, {
+                policy: agentsBySeat[playerID] as AgentPolicyID,
+                seed: decisionSeed,
+                weights,
+              });
+      } catch (caught) {
+        if (caught instanceof NoLegalActionError) {
+          // Known rules-layer deadlock (bank/gold empty, nothing legal).
+          const pass = legal.find(
+            (candidate) => candidate.actionKey === 'pass:stall-rescue',
+          );
+          if (!pass) {
+            gameAborted = true;
+            break;
+          }
+          decision = {
+            move: pass.move,
+            modelVersion: 'stall-rescue',
+            policy: agentsBySeat[playerID],
+            seed: decisionSeed,
+            nodesVisited: 1,
+            elapsedMs: 0,
+            timedOut: false,
+            fallbackLevel: 2,
+          };
+        } else {
+          throw caught;
+        }
+      }
       const chosen = legal.find(
         (candidate) => JSON.stringify(candidate.move) === JSON.stringify(decision.move),
       );
@@ -209,6 +240,7 @@ const main = async (): Promise<void> => {
     }
     const standings = createStandings(sim.G);
     const winners = new Set(sim.G.result?.winners ?? []);
+    if (gameAborted) continue;
     for (const line of gameLines) {
       const won = winners.has(line.actor);
       const outcome = won ? 1 : -1;

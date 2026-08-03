@@ -20,7 +20,7 @@ import {
   createSimulation,
   type SimulationState,
 } from '../simulate.js';
-import type { NeuralPolicy } from '../neural/inference.js';
+import type { NeuralPolicyLike } from '../neural/inference.js';
 import type { AIObservation } from '../observation.js';
 import { createObservation } from '../observation.js';
 import { createPlayerView } from '../../../game/playerView.js';
@@ -198,7 +198,7 @@ const searchDeterminization = async (
   ctx: BoardContextView,
   weights: Record<string, number>,
   seed: string,
-  neural: NeuralPolicy,
+  neural: NeuralPolicyLike,
   rootSim: SimulationState,
   rootActions: AIActionCandidate[],
   budget: { sims: number; deadlineEpochMs: number },
@@ -358,7 +358,7 @@ const rolloutValue = async (
   sim: SimulationState,
   weights: Record<string, number>,
   seed: string,
-  neural: NeuralPolicy,
+  neural: NeuralPolicyLike,
 ): Promise<number> => {
   let valueSim = createSimulation(cloneState(sim.G), ctxOf(sim));
   for (let roll = 0; roll < 2; roll += 1) {
@@ -395,7 +395,7 @@ const searchAlternating = async (
   ctx: BoardContextView,
   weights: Record<string, number>,
   seed: string,
-  neural: NeuralPolicy,
+  neural: NeuralPolicyLike,
   rootSim: SimulationState,
   rootActions: AIActionCandidate[],
   budget: { sims: number; deadlineEpochMs: number },
@@ -546,7 +546,7 @@ export const computeNeuralPuctDecision = async (
     ctx: BoardContextView;
     seed: string;
     weights: Record<string, number>;
-    neural: NeuralPolicy;
+    neural: NeuralPolicyLike;
     budget?: {
       deadlineEpochMs?: number;
       simsPerDeterminization?: number;

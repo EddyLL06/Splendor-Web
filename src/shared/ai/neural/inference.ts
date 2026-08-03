@@ -28,6 +28,24 @@ import {
 
 export const NEURAL_MODEL_VERSION = 'neural-policy-v1.0.0';
 
+/** Common surface shared by single and ensemble policies. */
+export interface NeuralPolicyLike {
+  choose(
+    observation: AIObservation,
+    ctx: BoardContextView,
+    seed: string,
+  ): Promise<BotDecision>;
+  priorOver(
+    actions: Array<{ move: BotDecision['move'] }>,
+    observation: AIObservation,
+  ): Promise<number[]>;
+  value(
+    state: SplendorState,
+    playerID: string,
+    ctx: BoardContextView,
+  ): Promise<number>;
+}
+
 export class NeuralPolicy {
   private constructor(private readonly session: ort.InferenceSession) {}
 
@@ -148,5 +166,57 @@ export class NeuralPolicy {
 
   dispose(): void {
     // Session is released by GC; explicit release is not exposed in node.
+  }
+}
+
+/**
+ * Ensemble of policy nets: priors and values are averaged across members
+ * (arithmetic mean of softmax priors, mean of values). Stronger and more
+ * robust than a single checkpoint at a linear inference-cost multiple.
+ */
+export class EnsemblePolicy {
+  private constructor(private readonly members: NeuralPolicy[]) {}
+
+  static async load(modelPaths: string[]): Promise<EnsemblePolicy> {
+    const members: NeuralPolicy[] = [];
+    for (const path of modelPaths) {
+      members.push(await NeuralPolicy.load(path));
+    }
+    return new EnsemblePolicy(members);
+  }
+
+  async choose(
+    observation: AIObservation,
+    ctx: BoardContextView,
+    seed: string,
+  ): Promise<BotDecision> {
+    return this.members[0].choose(observation, ctx, seed);
+  }
+
+  async priorOver(
+    actions: Array<{ move: BotDecision['move'] }>,
+    observation: AIObservation,
+  ): Promise<number[]> {
+    const priors = await Promise.all(
+      this.members.map((member) => member.priorOver(actions, observation)),
+    );
+    return priors[0].map((_, index) =>
+      priors.reduce((sum, entry) => sum + entry[index], 0) / priors.length,
+    );
+  }
+
+  async value(
+    state: SplendorState,
+    playerID: string,
+    ctx: BoardContextView,
+  ): Promise<number> {
+    const values = await Promise.all(
+      this.members.map((member) => member.value(state, playerID, ctx)),
+    );
+    return values.reduce((sum, entry) => sum + entry, 0) / values.length;
+  }
+
+  dispose(): void {
+    for (const member of this.members) member.dispose();
   }
 }
