@@ -44,6 +44,8 @@ COPY --from=build /app/dist /app/dist
 COPY --from=build /app/dist-server /app/dist-server
 COPY --from=build /app/prisma /app/prisma
 COPY --from=build /app/prisma.config.ts /app/prisma.config.ts
+# Bundled AI models: heuristic weights + neural Expert ONNX + manifest.
+COPY --from=build /app/ai_bot/models /app/ai_bot/models
 
 COPY railway-nginx.conf.template /etc/nginx/templates/gem-council.conf.template
 COPY railway-entrypoint.sh /app/railway-entrypoint.sh
