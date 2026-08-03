@@ -133,6 +133,7 @@ const playOpponentsUntilBot = (
 
 interface PuctNode {
   sim: SimulationState;
+  playerToMove: PlayerID;
   actions: AIActionCandidate[];
   priors: number[];
   children: Array<PuctNode | null>;
@@ -168,6 +169,30 @@ const selectChild = (node: PuctNode): number => {
   return bestIndex;
 };
 
+/**
+ * Negamax-aware child selection for alternating trees: every node stores
+ * values in its own player's perspective, so the Q term for a child (which
+ * is the opponent's node) must be negated at selection time.
+ */
+const selectChildNegamax = (node: PuctNode): number => {
+  const parentVisits = Math.max(1, node.visits);
+  let bestIndex = 0;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < node.actions.length; index += 1) {
+    const child = node.children[index];
+    const visits = child?.visits ?? 0;
+    const q = child && visits > 0 ? -child.totalValue / visits : 0;
+    const exploration =
+      2.0 * node.priors[index] * Math.sqrt(parentVisits) / (1 + visits);
+    const score = q + exploration;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+};
+
 const searchDeterminization = async (
   observation: AIObservation,
   ctx: BoardContextView,
@@ -182,6 +207,7 @@ const searchDeterminization = async (
   const rootPriors = await neural.priorOver(rootActions, observation);
   const root: PuctNode = {
     sim: rootSim,
+    playerToMove: playerID,
     actions: rootActions,
     priors: rootPriors,
     children: rootActions.map(() => null),
@@ -233,6 +259,7 @@ const searchDeterminization = async (
             : -1_000_000;
           node.children[index] = {
             sim: childSim,
+            playerToMove: playerID,
             actions: [],
             priors: [],
             children: [],
@@ -252,6 +279,7 @@ const searchDeterminization = async (
           value = -1_000_000;
           node.children[index] = {
             sim: childSim,
+            playerToMove: playerID,
             actions: [],
             priors: [],
             children: [],
@@ -268,6 +296,7 @@ const searchDeterminization = async (
         ));
         child = {
           sim: childSim,
+          playerToMove: playerID,
           actions,
           priors,
           children: actions.map(() => null),
@@ -309,6 +338,208 @@ const observationWith = (
   );
 };
 
+const observationFor = (
+  sim: SimulationState,
+  playerID: PlayerID,
+): AIObservation =>
+  createObservation(
+    createPlayerView(sim.G, playerID),
+    playerID,
+    ctxOf(sim),
+  );
+
+/**
+ * Network value after a short Normal-policy rollout (up to two extra full
+ * turns), so the undertrained value head sees a deeper, more informative
+ * position. The final value is taken from the resulting state's current
+ * player's perspective (negamax backup converts it).
+ */
+const rolloutValue = async (
+  sim: SimulationState,
+  weights: Record<string, number>,
+  seed: string,
+  neural: NeuralPolicy,
+): Promise<number> => {
+  let valueSim = createSimulation(cloneState(sim.G), ctxOf(sim));
+  for (let roll = 0; roll < 2; roll += 1) {
+    if (valueSim.G.result !== null) break;
+    const mover = valueSim.currentPlayer;
+    const reply = chooseNormalMove(
+      valueSim.G,
+      mover,
+      ctxOf(valueSim),
+      `${seed}:roll:${roll}`,
+      weights,
+    );
+    if (!applyCandidateFullTurn(valueSim, mover, reply, weights, seed, roll)) {
+      break;
+    }
+  }
+  const gameResult = valueSim.G.result;
+  if (gameResult) {
+    return gameResult.winners.includes(valueSim.currentPlayer)
+      ? 1_000_000
+      : -1_000_000;
+  }
+  const leafPlayer = valueSim.currentPlayer;
+  return neural.value(valueSim.G, leafPlayer, ctxOf(valueSim));
+};
+
+/**
+ * Two-player alternating PUCT: both sides use the network policy as prior
+ * and the network value at leaves; backups use negamax sign conversion so
+ * every node keeps values in its own player's perspective.
+ */
+const searchAlternating = async (
+  observation: AIObservation,
+  ctx: BoardContextView,
+  weights: Record<string, number>,
+  seed: string,
+  neural: NeuralPolicy,
+  rootSim: SimulationState,
+  rootActions: AIActionCandidate[],
+  budget: { sims: number; deadlineEpochMs: number },
+): Promise<{ visits: number; totalValue: number }[]> => {
+  const botID = observation.playerID;
+  const rootPriors = await neural.priorOver(rootActions, observation);
+  const root: PuctNode = {
+    sim: rootSim,
+    playerToMove: botID,
+    actions: rootActions,
+    priors: rootPriors,
+    children: rootActions.map(() => null),
+    visits: 0,
+    totalValue: 0,
+    expanded: true,
+    terminalValue: rootSim.G.result
+      ? rootSim.G.result.winners.includes(botID)
+        ? 1_000_000
+        : -1_000_000
+      : null,
+  };
+
+  for (let simulation = 0; simulation < budget.sims; simulation += 1) {
+    if (performance.now() >= budget.deadlineEpochMs) break;
+    const path: PuctNode[] = [root];
+    let node = root;
+    let value = 0;
+
+    while (node.expanded && node.terminalValue === null) {
+      const index = selectChildNegamax(node);
+      let child = node.children[index];
+      if (!child) {
+        const childSim = createSimulation(
+          cloneState(node.sim.G),
+          ctxOf(node.sim),
+        );
+        if (
+          !applyCandidateFullTurn(
+            childSim,
+            node.playerToMove,
+            node.actions[index],
+            weights,
+            seed,
+            simulation,
+          )
+        ) {
+          node.children[index] = null;
+          value = -1_000_000;
+          break;
+        }
+        const gameResult = childSim.G.result;
+        if (gameResult) {
+          const currentPlayer = childSim.currentPlayer;
+          value = gameResult.winners.includes(currentPlayer)
+            ? 1_000_000
+            : -1_000_000;
+          const terminalChild: PuctNode = {
+            sim: childSim,
+            playerToMove: currentPlayer,
+            actions: [],
+            priors: [],
+            children: [],
+            visits: 0,
+            totalValue: 0,
+            expanded: true,
+            terminalValue: value,
+          };
+          node.children[index] = terminalChild;
+          node = terminalChild;
+          path.push(node);
+          break;
+        }
+        const nextPlayer = childSim.currentPlayer;
+        const actions = enumerateLegalActions(
+          childSim.G,
+          nextPlayer,
+          childSim.currentPlayer,
+        );
+        if (actions.length === 0) {
+          value = -1_000_000;
+          const terminalChild: PuctNode = {
+            sim: childSim,
+            playerToMove: nextPlayer,
+            actions: [],
+            priors: [],
+            children: [],
+            visits: 0,
+            totalValue: 0,
+            expanded: true,
+            terminalValue: value,
+          };
+          node.children[index] = terminalChild;
+          node = terminalChild;
+          path.push(node);
+          break;
+        }
+        const nextObservation = observationFor(childSim, nextPlayer);
+        const priors = await neural.priorOver(actions, nextObservation);
+        child = {
+          sim: childSim,
+          playerToMove: nextPlayer,
+          actions,
+          priors,
+          children: actions.map(() => null),
+          visits: 0,
+          totalValue: 0,
+          expanded: true,
+          terminalValue: null,
+        };
+        node.children[index] = child;
+        node = child;
+        path.push(node);
+        value = await rolloutValue(childSim, weights, seed, neural);
+        break;
+      }
+      node = child;
+      path.push(node);
+    }
+    if (node.terminalValue !== null) value = node.terminalValue;
+
+    // Negamax backup: convert the leaf value into each ancestor's
+    // perspective as we walk up.
+    let currentPlayer = node.playerToMove;
+    for (let pathIndex = path.length - 1; pathIndex >= 0; pathIndex -= 1) {
+      const entry = path[pathIndex];
+      if (entry.playerToMove !== currentPlayer) {
+        value = -value;
+        currentPlayer = entry.playerToMove;
+      }
+      entry.visits += 1;
+      entry.totalValue += value;
+    }
+  }
+  return rootActions.map((candidate, index) => {
+    const child = root.children[index];
+    // Children are opponent nodes storing values in the opponent's
+    // perspective; convert to the root (Bot) perspective for aggregation.
+    return {
+      visits: child?.visits ?? 0,
+      totalValue: child ? -child.totalValue : 0,
+    };
+  });
+};
+
 export const computeNeuralPuctDecision = async (
   input: {
     observation: AIObservation;
@@ -321,9 +552,20 @@ export const computeNeuralPuctDecision = async (
       simsPerDeterminization?: number;
       determinizations?: number;
     };
+    mode?: 'auto' | 'alternating' | 'bot-tree';
+    onDebug?: (rows: Array<{ key: string; visits: number; q: number }>) => void;
   },
 ): Promise<BotDecision> => {
-  const { observation, ctx, seed, weights, neural, budget = {} } = input;
+  const {
+    observation,
+    ctx,
+    seed,
+    weights,
+    neural,
+    budget = {},
+    mode = 'auto',
+    onDebug,
+  } = input;
   const startedAt = performance.now();
   const deadlineEpochMs = budget.deadlineEpochMs ?? performance.now() + 200;
   const simsPerDeterminization = budget.simsPerDeterminization ?? 96;
@@ -350,16 +592,29 @@ export const computeNeuralPuctDecision = async (
       break;
     }
     fallbackMove = rootActions[0].move;
-    const totals = await searchDeterminization(
-      observation,
-      ctx,
-      weights,
-      seed,
-      neural,
-      createSimulation(cloneState(fullState), ctx),
-      rootActions,
-      { sims: simsPerDeterminization, deadlineEpochMs },
-    );
+    const useAlternating =
+      mode === 'alternating' || (mode === 'auto' && observation.playerOrder.length === 2);
+    const totals = useAlternating
+        ? await searchAlternating(
+            observation,
+            ctx,
+            weights,
+            seed,
+            neural,
+            createSimulation(cloneState(fullState), ctx),
+            rootActions,
+            { sims: simsPerDeterminization, deadlineEpochMs },
+          )
+        : await searchDeterminization(
+            observation,
+            ctx,
+            weights,
+            seed,
+            neural,
+            createSimulation(cloneState(fullState), ctx),
+            rootActions,
+            { sims: simsPerDeterminization, deadlineEpochMs },
+          );
     rootActions.forEach((candidate, index) => {
       const entry = aggregate.get(candidate.actionKey) ?? {
         visits: 0,
@@ -383,6 +638,15 @@ export const computeNeuralPuctDecision = async (
       bestScore = q;
       bestKey = key;
     }
+  }
+  if (onDebug) {
+    onDebug(
+      [...aggregate.entries()].map(([key, entry]) => ({
+        key,
+        visits: entry.visits,
+        q: entry.visits > 0 ? entry.totalValue / entry.visits : 0,
+      })),
+    );
   }
   let bestMove = fallbackMove as BotDecision['move'];
   if (bestKey !== '') {

@@ -141,6 +141,8 @@ const main = async (): Promise<void> => {
       );
       const legal = enumerateLegalActions(sim.G, playerID, sim.currentPlayer);
       const decisionSeed = `${seed}:${gameIndex}:${guard}`;
+      let visitTarget: Record<string, number> | undefined;
+      let searchValue: number | undefined;
       const decision =
         agentsBySeat[playerID] === 'neural-puct-v1' && neural
           ? await computeNeuralPuctDecision({
@@ -151,8 +153,17 @@ const main = async (): Promise<void> => {
               neural,
               budget: {
                 deadlineEpochMs: performance.now() + 200,
-                simsPerDeterminization: 64,
+                simsPerDeterminization: 96,
                 determinizations: 2,
+              },
+              // Bot-tree search is the current strongest teacher; the
+              // alternating search still needs more value training.
+              mode: 'bot-tree',
+              onDebug: (rows) => {
+                visitTarget = Object.fromEntries(
+                  rows.map((row) => [row.key, row.visits]),
+                );
+                searchValue = rows.reduce((best, row) => Math.max(best, row.q), -1);
               },
             })
           : chooseBotMove(observation, ctx, {
@@ -178,6 +189,7 @@ const main = async (): Promise<void> => {
             move: candidate.move,
           })),
           chosen: chosen.actionKey,
+          ...(visitTarget ? { visits: visitTarget, searchValue } : {}),
         }),
       });
       const [argument] = decision.move.args;

@@ -64,6 +64,7 @@ const playGame = async (
   search: boolean,
   sims: number,
   determinizations: number,
+  mode: 'auto' | 'alternating' | 'bot-tree',
 ): Promise<GameResult> => {
   const rng = createSeededRNG(`game:${seed}:${index}`);
   const initialState = createInitialState(numPlayers, {
@@ -115,6 +116,7 @@ const playGame = async (
             seed: decisionSeed,
             weights,
             neural,
+            mode,
             budget: {
               deadlineEpochMs: performance.now() + 300,
               simsPerDeterminization: sims,
@@ -175,6 +177,10 @@ const main = async (): Promise<void> => {
   const search = values.get('search') === 'true';
   const sims = Number(values.get('sims') ?? '96');
   const determinizations = Number(values.get('determinizations') ?? '2');
+  const mode = (values.get('mode') ?? 'auto') as
+    | 'auto'
+    | 'alternating'
+    | 'bot-tree';
 
   const weightsModel = parseModel(
     JSON.parse(await readFile(weightsPath, 'utf8')),
@@ -209,6 +215,7 @@ const main = async (): Promise<void> => {
         search,
         sims,
         determinizations,
+        mode,
       ),
     );
   }

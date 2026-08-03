@@ -35,7 +35,8 @@ def evaluate(
     observations,
     action_arrays,
     mask_arrays,
-    target_list,
+    target_arrays,
+    value_targets,
     indices,
     batch_size: int,
 ) -> dict:
@@ -51,12 +52,14 @@ def evaluate(
                 observations,
                 action_arrays,
                 mask_arrays,
-                target_list,
+                target_arrays,
+                value_targets,
                 chunk,
             )
             logits, value = net(obs, actions, masks)
             predicted = logits.argmax(dim=-1)
-            correct += (predicted == batch_targets).sum().item()
+            expected = batch_targets.argmax(dim=-1)
+            correct += (predicted == expected).sum().item()
             total += len(chunk)
             value_error += torch.abs(value - outcomes).sum().item()
     return {
@@ -68,34 +71,39 @@ def evaluate(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", required=True)
+    parser.add_argument("--data", required=True, help="Comma-separated positions.jsonl paths")
     parser.add_argument("--epochs", type=int, default=12)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--out", required=True)
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--init", default=None, help="Optional checkpoint to fine-tune from")
+    parser.add_argument("--value-weight", type=float, default=1.0)
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
     random.seed(args.seed)
     os.makedirs(args.out, exist_ok=True)
 
-    positions = load_positions(args.data)
+    positions = []
+    for data_path in args.data.split(","):
+        positions.extend(load_positions(data_path.strip()))
+    print(f"loaded {len(positions)} positions from {args.data}")
     train_indices, holdout_indices = train_holdout_split(positions)
     print(
         f"positions={len(positions)} train={len(train_indices)} "
         f"holdout={len(holdout_indices)}"
     )
     observations = precompute_observations(positions)
-    action_arrays, mask_arrays, target_list = precompute_actions(positions)
+    action_arrays, mask_arrays, target_arrays, value_targets = (
+        precompute_actions(positions)
+    )
 
     net = PolicyValueNet()
     if args.init:
         net.load_state_dict(torch.load(args.init, map_location="cpu"))
         print(f"fine-tuning from {args.init}")
     optimizer = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=1e-4)
-    policy_loss_fn = nn.CrossEntropyLoss()
     value_loss_fn = nn.MSELoss()
 
     started = time.time()
@@ -112,14 +120,19 @@ def main() -> None:
                 observations,
                 action_arrays,
                 mask_arrays,
-                target_list,
+                target_arrays,
+                value_targets,
                 chunk,
             )
             optimizer.zero_grad()
             logits, value = net(obs, actions, masks)
-            policy_loss = policy_loss_fn(logits, targets)
+            log_probs = torch.log_softmax(logits, dim=-1)
+            safe_log_probs = torch.where(
+                masks > 0, log_probs, torch.zeros_like(log_probs)
+            )
+            policy_loss = -(targets * safe_log_probs).sum(dim=-1).mean()
             value_loss = value_loss_fn(value, outcomes)
-            loss = policy_loss + value_loss
+            loss = policy_loss + args.value_weight * value_loss
             loss.backward()
             optimizer.step()
             total_policy += policy_loss.item()
@@ -130,7 +143,8 @@ def main() -> None:
             observations,
             action_arrays,
             mask_arrays,
-            target_list,
+            target_arrays,
+            value_targets,
             train_indices[:2000],
             args.batch_size,
         )
@@ -140,7 +154,8 @@ def main() -> None:
             observations,
             action_arrays,
             mask_arrays,
-            target_list,
+            target_arrays,
+            value_targets,
             holdout_indices,
             args.batch_size,
         )
@@ -165,7 +180,8 @@ def main() -> None:
         observations,
         action_arrays,
         mask_arrays,
-        target_list,
+        target_arrays,
+        value_targets,
         holdout_indices,
         args.batch_size,
     )
