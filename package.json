@@ -11,7 +11,7 @@
     "dev:client": "vite --host 0.0.0.0 --port 5173",
     "dev:server": "tsx watch src/server/server.ts",
     "dev:server:no-reload": "tsx src/server/server.ts",
-    "build": "npm run data:generate && npm run typecheck && vite build && tsc -p tsconfig.server.json",
+  "build": "npm run data:generate && npm run typecheck && vite build && tsc -p tsconfig.server.json && tsx scripts/ai/write-rules-fingerprint.ts",
     "config:local": "tsx scripts/ensure-local-env.ts",
     "storage:prepare": "tsx scripts/prepare-storage.ts",
     "prisma:generate": "prisma generate",

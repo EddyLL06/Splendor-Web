@@ -774,7 +774,7 @@ const loadAiModel = (projectRoot: string): AiModelInfo => {
       current === null ? null : current === model.rulesFingerprint;
     if (current === null) {
       console.warn(
-        '[ai] rules fingerprint unavailable (source tree missing); compatibility check skipped.',
+        '[ai] rules fingerprint unavailable; compatibility check skipped.',
       );
     } else if (match === false) {
       console.warn(

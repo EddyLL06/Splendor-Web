@@ -38,3 +38,18 @@ move in production after a worker restart.
 
 Typecheck clean; full Vitest **201/201**; `npm run build` clean.
 The Railway build that previously failed is expected to pass on redeploy.
+
+## Follow-up: production rules-fingerprint verification
+
+Railway runtime images do not ship `src/`, so the startup fingerprint check
+logged `[ai] rules fingerprint unavailable (source tree missing);
+compatibility check skipped.` (benign, but the check was a no-op in prod).
+Fixed:
+
+- `scripts/ai/write-rules-fingerprint.ts` runs at the end of `npm run build`
+  and writes `dist-server/ai-rules-fingerprint.txt` from the source tree.
+- `rulesFingerprintOrNull` now prefers the build-time export, then the
+  source tree, then null. Production containers therefore report a real
+  `rules fingerprint match` (verified: generated value equals the model
+  manifest `1ba7ffbd...`).
+- Added a unit test for the build-time export path.

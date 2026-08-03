@@ -25,13 +25,25 @@ export const rulesFingerprint = (
 };
 
 /**
- * Same fingerprint, but returns null when the source tree is unavailable
- * (e.g. a stripped production artifact) instead of throwing. Callers must
- * treat null as "cannot verify" and never as a match.
+ * Same fingerprint, but returns null when it cannot be computed instead of
+ * throwing. Priority:
+ * 1. build-time export `dist-server/ai-rules-fingerprint.txt` (production
+ *    containers ship this without `src/`);
+ * 2. the source tree (dev/test);
+ * 3. null ("cannot verify"). Callers must never treat null as a match.
  */
 export const rulesFingerprintOrNull = (
   projectRoot = resolve(import.meta.dirname, '..', '..', '..', '..'),
 ): string | null => {
+  try {
+    const built = readFileSync(
+      join(projectRoot, 'dist-server', 'ai-rules-fingerprint.txt'),
+      'utf8',
+    ).trim();
+    if (/^[a-f0-9]{64}$/.test(built)) return built;
+  } catch {
+    // No build-time export; fall through to the source tree.
+  }
   try {
     return rulesFingerprint(projectRoot);
   } catch {

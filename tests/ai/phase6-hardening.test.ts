@@ -1,7 +1,8 @@
 /// <reference types="node" />
 
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -10,7 +11,10 @@ import { shortHash } from '../../src/server/ai/sanitize.js';
 import { AiWorkerPool, workerEntryFor } from '../../src/server/ai/worker-pool.js';
 import { BotCoordinator } from '../../src/server/ai/bot-coordinator.js';
 import { parseModel } from '../../src/shared/ai/models/schema.js';
-import { rulesFingerprint } from '../../src/shared/ai/models/fingerprint.js';
+import {
+  rulesFingerprint,
+  rulesFingerprintOrNull,
+} from '../../src/shared/ai/models/fingerprint.js';
 import type { AppConfig } from '../../src/server/config.js';
 import {
   createTestApplication,
@@ -80,6 +84,22 @@ describe('phase 6: model rules fingerprint', () => {
     );
     const model = parseModel(JSON.parse(raw));
     expect(rulesFingerprint(projectRoot)).toBe(model.rulesFingerprint);
+  });
+
+  it('prefers the build-time fingerprint export when src is absent', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'gem-council-fp-'));
+    try {
+      const expected = 'a'.repeat(64);
+      await mkdir(join(root, 'dist-server'), { recursive: true });
+      await writeFile(
+        join(root, 'dist-server', 'ai-rules-fingerprint.txt'),
+        `${expected}\n`,
+        'utf8',
+      );
+      expect(rulesFingerprintOrNull(root)).toBe(expected);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
