@@ -116,7 +116,7 @@ const playGame = async (
             weights,
             neural,
             budget: {
-              deadlineEpochMs: performance.now() + 200,
+              deadlineEpochMs: performance.now() + 300,
               simsPerDeterminization: sims,
               determinizations,
             },

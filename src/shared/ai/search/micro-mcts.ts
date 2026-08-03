@@ -20,7 +20,7 @@ import {
   FEATURE_NAMES,
 } from '../features.js';
 import { evaluateWithWeights } from '../evaluate.js';
-import { getBonuses, analyzePayment } from '../../rules/selectors.js';
+import { getBonuses, getScore, analyzePayment } from '../../rules/selectors.js';
 import { getCard, getNoble } from '../../data/gameData.js';
 import { determinize } from '../hidden-information.js';
 import { enumerateLegalActions, type AIActionCandidate } from '../legal-actions.js';
@@ -86,6 +86,7 @@ const expertExtras = (
   tempoCancel: number;
   affordableBonus: number;
   tokenHoardingPenalty: number;
+  bonusCountBonus: number;
 } => ({
   tempoCancel: weights.__x_tempoCancel ?? EXPERT_EVAL_WEIGHTS.tempoCancel,
   affordableBonus:
@@ -93,6 +94,7 @@ const expertExtras = (
   tokenHoardingPenalty:
     weights.__x_tokenHoardingPenalty ??
     EXPERT_EVAL_WEIGHTS.tokenHoardingPenalty,
+  bonusCountBonus: weights.__x_bonusCountBonus ?? 0,
 });
 
 const averageNobleCloseness = (
@@ -178,6 +180,13 @@ const evaluateLeaf = (
   value += features.tempo * extras.tempoCancel;
   value += features.affordableCount * extras.affordableBonus;
   value -= features.tokensTotal * extras.tokenHoardingPenalty;
+  value +=
+    (features.bonusWhite +
+      features.bonusBlue +
+      features.bonusGreen +
+      features.bonusRed +
+      features.bonusBlack) *
+    extras.bonusCountBonus;
   const w = EXPERT_EVAL_WEIGHTS;
   value -= opponentPressure(state, playerID);
   if (memory) {
@@ -314,6 +323,10 @@ const playOpponentsUntilBot = (
   nodeBudget: { used: number; max: number },
   hardLayers = 1,
 ): void => {
+  const scores = sim.G.playerOrder.map((playerID) =>
+    getScore(sim.G, playerID),
+  );
+  const leader = Math.max(0, ...scores);
   let guard = 0;
   while (
     sim.G.result === null &&
@@ -323,9 +336,12 @@ const playOpponentsUntilBot = (
     guard += 1;
     // Model competitive opponents (within 3 points of the leader) as
     // Hard-lite searchers; weaker opponents stay cheap Normal.
-    // Hard-lite opponent modeling is disabled for now (cost); opponents are
-    // modeled as Normal like Hard does.
-    const competitive = false;
+    // Hard-lite opponent modeling: used only where the caller asks for it
+    // (final leaf responses); intermediate opponents stay Normal.
+    const competitive =
+      hardLayers > 0 &&
+      (sim.G.playerOrder.length === 2 ||
+        getScore(sim.G, sim.currentPlayer) >= leader - 3);
     playOneFullTurn(
       sim,
       sim.currentPlayer,
@@ -473,6 +489,7 @@ export const computeExpertDecision = (
     5,
     nodeBudget,
     deadline,
+    0,
   );
   if (roundOne.length === 0) {
     throw new NoLegalActionError(playerID, 0);
@@ -508,6 +525,7 @@ export const computeExpertDecision = (
         memory,
         deadline,
         nodeBudget,
+        0,
       );
       if (nextTurnSim.G.result !== null || nextTurnSim.currentPlayer !== playerID) {
         nextLines.push({
@@ -527,6 +545,7 @@ export const computeExpertDecision = (
         4,
         nodeBudget,
         deadline,
+        0,
       );
       if (round.length === 0) {
         nextLines.push({
@@ -549,6 +568,7 @@ export const computeExpertDecision = (
           memory,
           deadline,
           nodeBudget,
+          0,
         );
         nextLines.push({
           firstMove: line.firstMove,

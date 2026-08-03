@@ -74,6 +74,7 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--out", required=True)
     parser.add_argument("--seed", type=int, default=1234)
+    parser.add_argument("--init", default=None, help="Optional checkpoint to fine-tune from")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
@@ -90,6 +91,9 @@ def main() -> None:
     action_arrays, mask_arrays, target_list = precompute_actions(positions)
 
     net = PolicyValueNet()
+    if args.init:
+        net.load_state_dict(torch.load(args.init, map_location="cpu"))
+        print(f"fine-tuning from {args.init}")
     optimizer = torch.optim.AdamW(net.parameters(), lr=args.lr, weight_decay=1e-4)
     policy_loss_fn = nn.CrossEntropyLoss()
     value_loss_fn = nn.MSELoss()

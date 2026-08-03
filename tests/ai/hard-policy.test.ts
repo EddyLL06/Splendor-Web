@@ -151,8 +151,10 @@ describe('Expert micro-MCTS', () => {
       expertDecision(state, actor, 'expert-seed').move,
     );
     const { first, second } = samePlayerViewStates();
-    expect(expertDecision(second, '1', 'fair', 60).move).toEqual(
-      expertDecision(first, '1', 'fair', 60).move,
+    // Generous budget: wall-clock-capped searches must COMPLETE for the
+    // hidden-information invariant to hold (best-so-far depends on timing).
+    expect(expertDecision(second, '1', 'fair', 300).move).toEqual(
+      expertDecision(first, '1', 'fair', 300).move,
     );
   });
 

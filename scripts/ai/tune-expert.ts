@@ -28,6 +28,7 @@ const EXPERT_KNOBS = [
   '__x_tempoCancel',
   '__x_affordableBonus',
   '__x_tokenHoardingPenalty',
+  '__x_bonusCountBonus',
 ] as const;
 
 const BASE_KNOBS = [
@@ -39,6 +40,8 @@ const BASE_KNOBS = [
   'bonusBalance',
   'nobleProgress',
   'opponentMaxScore',
+  'purchasedCount',
+  'tiebreakCards',
 ] as const;
 
 type KnobName = (typeof EXPERT_KNOBS)[number] | (typeof BASE_KNOBS)[number];
@@ -135,6 +138,7 @@ const main = async (): Promise<void> => {
     __x_tempoCancel: 1.5,
     __x_affordableBonus: 2,
     __x_tokenHoardingPenalty: 0.3,
+    __x_bonusCountBonus: 0.5,
     score: 2,
     tokensTotal: 0.4,
     gold: 0.6,
@@ -143,6 +147,8 @@ const main = async (): Promise<void> => {
     bonusBalance: 1.5,
     nobleProgress: 3,
     opponentMaxScore: 1,
+    purchasedCount: 0.5,
+    tiebreakCards: 0.5,
   };
 
   for (let iteration = 0; iteration < iterations; iteration += 1) {
@@ -155,7 +161,7 @@ const main = async (): Promise<void> => {
     if (next < -30 || next > 60) continue;
     candidate[knob] = next;
     const result = await evaluate(candidate, `${seed}:${iteration}`);
-    if (result.winRate > bestResult.winRate) {
+    if (result.winRate > bestResult.winRate + 0.02) {
       bestResult = result;
       bestWeights = candidate;
       process.stdout.write(
