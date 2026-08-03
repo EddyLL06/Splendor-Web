@@ -579,7 +579,6 @@ export const computeNeuralPuctDecision = async (
     determinization < determinizations;
     determinization += 1
   ) {
-    if (performance.now() >= deadlineEpochMs) break;
     const rng = createSeededRNG(`puct:${seed}:${determinization}`);
     const fullState = determinize(observation, rng);
     const rootActions = enumerateLegalActions(
@@ -592,6 +591,10 @@ export const computeNeuralPuctDecision = async (
       break;
     }
     fallbackMove = rootActions[0].move;
+    // Check the deadline only after the (cheap) root enumeration so a stale
+    // deadline still yields a legal prior-based fallback instead of
+    // "no legal action".
+    if (performance.now() >= deadlineEpochMs) break;
     const useAlternating =
       mode === 'alternating' || (mode === 'auto' && observation.playerOrder.length === 2);
     const totals = useAlternating
@@ -626,6 +629,31 @@ export const computeNeuralPuctDecision = async (
     });
   }
   if (aggregate.size === 0) {
+    // No simulations ran (deadline expired or search failed): degrade to
+    // the neural policy prior over the root legal actions.
+    if (fallbackMove) {
+      const rng = createSeededRNG(`puct:${seed}:0`);
+      const fullState = determinize(observation, rng);
+      const rootActions = enumerateLegalActions(
+        fullState,
+        playerID,
+        observation.currentPlayer,
+      );
+      if (rootActions.length > 0) {
+        const priors = await neural.priorOver(rootActions, observation);
+        const bestIndex = priors.indexOf(Math.max(...priors));
+        return {
+          move: rootActions[bestIndex].move,
+          modelVersion: 'neural-puct-tree-v1.0.0',
+          policy: 'neural-puct-v1',
+          seed,
+          nodesVisited: 0,
+          elapsedMs: Math.round((performance.now() - startedAt) * 100) / 100,
+          timedOut: true,
+          fallbackLevel: 1,
+        };
+      }
+    }
     throw new NoLegalActionError(playerID, 0);
   }
 

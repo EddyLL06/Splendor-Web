@@ -26,9 +26,10 @@ let neuralPromise: Promise<NeuralPolicy | undefined> | undefined;
 let neuralLoadError: string | undefined;
 let neuralLoadLogged = false;
 
-const getNeuralPolicy = (): Promise<NeuralPolicy | undefined> => {
-  if (!config.expertEnabled || !config.neuralModelPath) return Promise.resolve(undefined);
-  neuralPromise ??= NeuralPolicy.load(config.neuralModelPath)
+// Start loading the model as soon as the worker boots so the first Expert
+// move does not pay the load latency inside its search deadline.
+if (config.expertEnabled && config.neuralModelPath) {
+  neuralPromise = NeuralPolicy.load(config.neuralModelPath)
     .then((policy) => policy)
     .catch((error: unknown) => {
       neuralLoadError = error instanceof Error ? error.message : String(error);
@@ -38,8 +39,10 @@ const getNeuralPolicy = (): Promise<NeuralPolicy | undefined> => {
       }
       return undefined;
     });
-  return neuralPromise;
-};
+}
+
+const getNeuralPolicy = (): Promise<NeuralPolicy | undefined> =>
+  neuralPromise ?? Promise.resolve(undefined);
 
 const post = (id: number, payload: {
   result?: unknown;
@@ -58,6 +61,14 @@ parentPort?.on(
   try {
     if (message.mode === 'expert') {
       const neural = await getNeuralPolicy();
+      const expertMaxMs = config.expertMaxMs ?? 500;
+      // The deadline sent by the controller can expire while the model is
+      // loading or under CPU pressure. Always give the search a fresh full
+      // window measured from when it actually starts.
+      const effectiveDeadline = Math.max(
+        message.input.budget?.deadlineEpochMs ?? 0,
+        performance.now() + expertMaxMs,
+      );
       if (neural) {
         try {
           const decision = await computeNeuralPuctDecision({
@@ -68,9 +79,7 @@ parentPort?.on(
             neural,
             mode: 'bot-tree',
             budget: {
-              deadlineEpochMs:
-                message.input.budget?.deadlineEpochMs ??
-                performance.now() + (config.expertMaxMs ?? 500),
+              deadlineEpochMs: effectiveDeadline,
               simsPerDeterminization: config.expertSims ?? 96,
               determinizations: config.expertDeterminizations ?? 2,
             },
@@ -82,7 +91,13 @@ parentPort?.on(
         }
       }
       const decision = {
-        ...computeExpertDecision(message.input),
+        ...computeExpertDecision({
+          ...message.input,
+          budget: {
+            ...message.input.budget,
+            deadlineEpochMs: effectiveDeadline,
+          },
+        }),
         fallbackLevel: 2 as const,
       };
       post(message.id, { result: decision });
