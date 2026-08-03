@@ -35,7 +35,9 @@ describe('neural Expert via shared worker pool', () => {
       workerCount: 1,
       entry: workerEntryFor(),
       queueLimit: 32,
-      hardMaxMs: 80,
+      // Generous watchdog: the worker loads the ONNX model on boot, and
+      // this test requests immediately after pool creation (worst case).
+      hardMaxMs: 3000,
       workerData: {
         expertEnabled: true,
         neuralModelPath: MODEL_PATH,
