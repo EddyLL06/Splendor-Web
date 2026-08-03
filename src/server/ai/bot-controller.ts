@@ -35,6 +35,13 @@ import type { AiWorkerPool } from './worker-pool.js';
 
 type GameClient = ReturnType<typeof Client<SplendorState>>;
 
+/**
+ * Presentation delay before each Bot move so human players perceive the
+ * Bot "thinking". Still deterministic per (match, seat, stateID).
+ */
+const DEFAULT_THINK_DELAY_MIN_MS = 2_000;
+const DEFAULT_THINK_DELAY_MAX_MS = 5_000;
+
 export interface BotControllerOptions {
   matchID: string;
   playerID: string;
@@ -44,7 +51,9 @@ export interface BotControllerOptions {
   accessTicket: string;
   credentials: string;
   serverURL: string;
+  /** Optional override for the pre-move presentation delay (ms). */
   thinkDelayMinMs?: number;
+  /** Optional override for the pre-move presentation delay (ms). */
   thinkDelayMaxMs?: number;
   onError?: (error: unknown) => void;
   pool?: AiWorkerPool;
@@ -110,8 +119,8 @@ export class BotController {
     const jitter = createSeededRNG(
       `${this.options.matchID}:${this.options.playerID}:${stateID}`,
     );
-    const min = this.options.thinkDelayMinMs ?? 350;
-    const max = this.options.thinkDelayMaxMs ?? 650;
+    const min = this.options.thinkDelayMinMs ?? DEFAULT_THINK_DELAY_MIN_MS;
+    const max = this.options.thinkDelayMaxMs ?? DEFAULT_THINK_DELAY_MAX_MS;
     const delay = min + jitter.next() * (max - min);
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
