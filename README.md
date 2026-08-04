@@ -220,10 +220,10 @@ See `.env.example`; it contains names and safe defaults only.
 | `AI_BOT_QUEUE_LIMIT` | `256` | Max queued AI search jobs before fallback |
 | `AI_BOT_HARD_MAX_MS` | `80` | Hard search compute budget per move |
 | `AI_BOT_EXPERT_ENABLED` | `true` | Expert difficulty uses the bundled neural PUCT agent |
-| `AI_BOT_NEURAL_MODEL` | `ai_bot/models/neural/policy-attn-s6.onnx` | ONNX policy-value model loaded per worker |
+| `AI_BOT_NEURAL_MODEL` | `ai_bot/models/neural/policy-attn-v3.onnx` | ONNX policy-value model loaded per worker |
 | `AI_BOT_EXPERT_SIMS` | `96` | PUCT simulations per determinization |
 | `AI_BOT_EXPERT_DETERMINIZATIONS` | `2` | Seeded hidden-state determinizations |
-| `AI_BOT_EXPERT_MAX_MS` | `500` | Expert search wall-clock budget per move |
+| `AI_BOT_EXPERT_MAX_MS` | `3000` | Expert search wall-clock budget per move |
 
 Non-test secrets must contain at least 256 bits of random material. Rotate a
 secret deliberately: changing the session or game credential key invalidates
@@ -244,8 +244,8 @@ Design constraints:
 - Each decision is bounded by CPU time, node count, and queue depth; timeouts
   and overload degrade to the cheap Normal policy so a game never stalls.
 - On a 2-vCPU / 2 GB RAM server keep `AI_BOT_WORKERS=1` (the `auto` default
-  already picks 1 there) and `AI_BOT_EXPERT_MAX_MS=500` (the default).
-  Expert runs an ONNX policy-value network (`policy-attn-s6.onnx`) with a
+  already picks 1 there) and `AI_BOT_EXPERT_MAX_MS=3000` (the default).
+  Expert runs an ONNX policy-value network (`policy-attn-v3.onnx`) with a
   bounded PUCT search in the shared worker pool; if the model file is missing
   or inference fails, it falls back to the heuristic Expert search and then
   to the Normal policy, so games never stall.
@@ -254,8 +254,8 @@ Design constraints:
   fingerprint against the deployed rule sources and logs a warning on
   mismatch; a missing/corrupt model falls back to built-in hand-tuned weights
   without breaking human play.
-- The neural Expert model lives in `ai_bot/models/neural/policy-attn-s6.onnx`
-  with a manifest (`policy-attn-s6.json`) recording encoder dims, SHA-256 and
+- The neural Expert model lives in `ai_bot/models/neural/policy-attn-v3.onnx`
+  with a manifest (`policy-attn-v3.json`) recording encoder dims, SHA-256 and
   training data. It is loaded once per worker thread at first Expert move.
   Training remains fully offline; production only runs inference.
 

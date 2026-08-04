@@ -12,6 +12,7 @@ import torch
 from features.encode import ACTION_DIM, OBS_DIM, encode_ai_move, encode_observation
 
 MAX_ACTIONS = 64
+MAX_PADDED_ACTIONS = MAX_ACTIONS + 1
 
 
 class Position:
@@ -191,3 +192,126 @@ def train_holdout_split(
         index for index, position in enumerate(positions) if position.holdout
     ]
     return train, holdout
+
+
+def precompute_memmap(
+    paths: List[str],
+    out_dir: str,
+    chunk_size: int = 20000,
+) -> Dict[str, Any]:
+    """Stream JSONL datasets from disk and encode them directly into memmap
+    arrays, so peak RAM stays bounded by a single parsed line, not the whole
+    corpus (the Position objects are never materialized)."""
+    os.makedirs(out_dir, exist_ok=True)
+    total = 0
+    for path in paths:
+        with open(path, "r", encoding="utf-8") as handle:
+            total += sum(1 for _ in handle)
+    obs = np.lib.format.open_memmap(
+        os.path.join(out_dir, "obs.npy"),
+        mode="w+",
+        dtype=np.float32,
+        shape=(total, OBS_DIM),
+    )
+    actions = np.lib.format.open_memmap(
+        os.path.join(out_dir, "actions.npy"),
+        mode="w+",
+        dtype=np.float32,
+        shape=(total, MAX_PADDED_ACTIONS, ACTION_DIM),
+    )
+    masks = np.lib.format.open_memmap(
+        os.path.join(out_dir, "masks.npy"),
+        mode="w+",
+        dtype=np.float32,
+        shape=(total, MAX_PADDED_ACTIONS),
+    )
+    targets = np.lib.format.open_memmap(
+        os.path.join(out_dir, "targets.npy"),
+        mode="w+",
+        dtype=np.float32,
+        shape=(total, MAX_PADDED_ACTIONS),
+    )
+    values = np.lib.format.open_memmap(
+        os.path.join(out_dir, "values.npy"),
+        mode="w+",
+        dtype=np.float32,
+        shape=(total,),
+    )
+    holdout = np.zeros((total,), dtype=bool)
+    row = 0
+    for path in paths:
+        with open(path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                meta_raw, entry_raw = line.split(" ", 1)
+                meta = json.loads(meta_raw)
+                entry = json.loads(entry_raw)
+                holdout[row] = meta["gameIndex"] % 10 == 0
+                obs[row] = np.asarray(
+                    encode_observation(entry["obs"]),
+                    dtype=np.float32,
+                )
+                legal = entry["legal"][:MAX_ACTIONS]
+                count = len(legal)
+                visits = entry.get("visits") or {}
+                total_visits = sum(visits.values())
+                chosen = entry["chosen"]
+                chosen_row = -1
+                for column, candidate in enumerate(legal):
+                    actions[row, column] = np.asarray(
+                        encode_ai_move(candidate["move"], entry["obs"]),
+                        dtype=np.float32,
+                    )
+                    masks[row, column] = 1.0
+                    if visits:
+                        targets[row, column] = (
+                            visits.get(candidate["key"], 0) / max(1, total_visits)
+                        )
+                    if candidate["key"] == chosen:
+                        chosen_row = column
+                if chosen_row < 0:
+                    target_entry = next(
+                        item for item in entry["legal"] if item["key"] == chosen
+                    )
+                    actions[row, count] = np.asarray(
+                        encode_ai_move(target_entry["move"], entry["obs"]),
+                        dtype=np.float32,
+                    )
+                    masks[row, count] = 1.0
+                    count += 1
+                    targets[row, count - 1] = 1.0 / count
+                elif not visits:
+                    targets[row, chosen_row] = 1.0
+                search_value = entry.get("searchValue")
+                if search_value is not None and search_value == search_value:
+                    values[row] = max(-1.0, min(1.0, search_value))
+                else:
+                    values[row] = 1.0 if meta["outcome"] > 0 else -1.0
+                row += 1
+                if row % 100000 == 0:
+                    print(f"precompute {row}/{total} rows", flush=True)
+    if row != total:
+        raise AssertionError(f"memmap row count {row} != expected {total}")
+    return {
+        "obs": obs,
+        "actions": actions,
+        "masks": masks,
+        "targets": targets,
+        "values": values,
+        "holdout": holdout,
+    }
+
+
+def make_batch_memmap(
+    dataset: Dict[str, Any],
+    indices: List[int],
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Build a batch from the disk-backed memmap arrays."""
+    obs = torch.from_numpy(dataset["obs"][indices])
+    actions = torch.from_numpy(dataset["actions"][indices])
+    masks = torch.from_numpy(dataset["masks"][indices])
+    target_matrix = torch.from_numpy(dataset["targets"][indices])
+    outcomes = torch.from_numpy(dataset["values"][indices])
+    return obs, actions, masks, target_matrix, outcomes

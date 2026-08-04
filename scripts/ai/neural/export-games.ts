@@ -50,6 +50,22 @@ const AGENT_POOL: TeacherID[] = [
   'uniform-random-v1',
 ];
 
+const parseTeachers = (value: string): TeacherID[] => {
+  const teachers = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  if (teachers.length === 0) {
+    throw new Error('--teachers must contain at least one teacher.');
+  }
+  for (const teacher of teachers) {
+    if (!AGENT_POOL.includes(teacher as TeacherID)) {
+      throw new Error(`Unknown teacher "${teacher}".`);
+    }
+  }
+  return teachers as TeacherID[];
+};
+
 const main = async (): Promise<void> => {
   const argv = process.argv.slice(2);
   const values = new Map<string, string>();
@@ -71,6 +87,22 @@ const main = async (): Promise<void> => {
     values.get('output') ?? `.local-data/ai-bot/neural-data/${seed}`,
   );
   const maxActions = Number(values.get('max-actions') ?? '3000');
+  const budgetMs = Number(values.get('budget-ms') ?? '3000');
+  if (!Number.isFinite(budgetMs) || budgetMs <= 0) {
+    throw new Error('--budget-ms must be a positive number of milliseconds.');
+  }
+  const sims = Number(values.get('sims') ?? '96');
+  if (!Number.isInteger(sims) || sims < 1) {
+    throw new Error('--sims must be a positive integer.');
+  }
+  const determinizations = Number(values.get('determinizations') ?? '2');
+  if (!Number.isInteger(determinizations) || determinizations < 1) {
+    throw new Error('--determinizations must be a positive integer.');
+  }
+  const progressEvery = Number(values.get('progress-every') ?? '25');
+  if (!Number.isInteger(progressEvery) || progressEvery < 1) {
+    throw new Error('--progress-every must be a positive integer.');
+  }
 
   const model = parseModel(
     JSON.parse(
@@ -82,6 +114,10 @@ const main = async (): Promise<void> => {
   const neural = neuralModelPath
     ? await NeuralPolicy.load(resolve(neuralModelPath))
     : undefined;
+  const teachers = parseTeachers(values.get('teachers') ?? AGENT_POOL.join(','));
+  if (teachers.includes('neural-puct-v1') && !neural) {
+    throw new Error('--teachers includes neural-puct-v1 but --neural-model is missing.');
+  }
   await mkdir(output, { recursive: true });
 
   let commit = 'unknown';
@@ -98,6 +134,7 @@ const main = async (): Promise<void> => {
   const hashes: string[] = [];
   const startedAt = performance.now();
   let positions = 0;
+  let capped = 0;
   for (let gameIndex = 0; gameIndex < games; gameIndex += 1) {
     const numPlayers = players[gameIndex % players.length];
     const rng = createSeededRNG(`game:${seed}:${gameIndex}`);
@@ -119,7 +156,7 @@ const main = async (): Promise<void> => {
     const agentsBySeat = Object.fromEntries(
       initialState.playerOrder.map((playerID, seat) => [
         playerID,
-        AGENT_POOL[(gameIndex + seat) % AGENT_POOL.length],
+        teachers[(gameIndex + seat) % teachers.length],
       ]),
     ) as Record<string, TeacherID>;
     const gameLines: Array<{
@@ -156,9 +193,9 @@ const main = async (): Promise<void> => {
                 weights,
                 neural,
                 budget: {
-                  deadlineEpochMs: performance.now() + 500,
-                  simsPerDeterminization: 96,
-                  determinizations: 2,
+                  deadlineEpochMs: performance.now() + budgetMs,
+                  simsPerDeterminization: sims,
+                  determinizations,
                 },
                 // Bot-tree search is the current strongest teacher; the
                 // alternating search still needs more value training.
@@ -240,6 +277,14 @@ const main = async (): Promise<void> => {
     }
     const standings = createStandings(sim.G);
     const winners = new Set(sim.G.result?.winners ?? []);
+    if (sim.G.result === null) {
+      capped += 1;
+    }
+    if ((gameIndex + 1) % progressEvery === 0) {
+      process.stderr.write(
+        `progress seed=${seed} game=${gameIndex + 1}/${games} positions=${positions} capped=${capped}\n`,
+      );
+    }
     if (gameAborted) continue;
     for (const line of gameLines) {
       const won = winners.has(line.actor);
@@ -265,6 +310,11 @@ const main = async (): Promise<void> => {
         seed,
         games,
         players,
+        teachers,
+        budgetMs,
+        sims,
+        determinizations,
+        capped,
         model: model.modelVersion,
         positions,
         summaryHash,
@@ -272,14 +322,14 @@ const main = async (): Promise<void> => {
         nodeVersion: process.version,
         platform: `${platform()} ${release()}`,
         cpu: cpus()[0]?.model ?? 'unknown',
-        elapsedSec: Math.round((performance.now() - startedAt) * 100) / 100,
+        elapsedMs: Math.round((performance.now() - startedAt) * 100) / 100,
       },
       null,
       2,
     ),
   );
   process.stdout.write(
-    `seed=${seed} games=${games} positions=${positions} hash=${summaryHash}\n`,
+    `seed=${seed} games=${games} positions=${positions} capped=${capped} hash=${summaryHash}\n`,
   );
 };
 

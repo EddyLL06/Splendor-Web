@@ -25,7 +25,11 @@ def main() -> None:
     with open(args.config, "r", encoding="utf-8") as handle:
         config = json.load(handle)
     net = (
-        PolicyValueNetAttention()
+        PolicyValueNetAttention(
+            d_model=int(config.get("d_model", 128)),
+            heads=int(config.get("heads", 4)),
+            layers=int(config.get("layers", 2)),
+        )
         if args.arch == "attention"
         else PolicyValueNet()
     )
@@ -49,6 +53,7 @@ def main() -> None:
             "value": {0: "batch"},
         },
         opset_version=17,
+        dynamo=False,
     )
     print(f"exported {args.out}")
 

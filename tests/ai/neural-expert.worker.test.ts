@@ -21,7 +21,7 @@ import type { BoardContextView } from '../../src/shared/ai/types.js';
 import { createSeededState } from './helpers.js';
 
 const weights = { ...HAND_TUNED_WEIGHTS } as unknown as Record<string, number>;
-const MODEL_PATH = 'ai_bot/models/neural/policy-attn-s6.onnx';
+const MODEL_PATH = 'ai_bot/models/neural/policy-attn-v3.onnx';
 
 const ctxFor = (state: SplendorState, playerID: string): BoardContextView => ({
   currentPlayer: state.initialFirstPlayer,
@@ -43,7 +43,7 @@ describe('neural Expert via shared worker pool', () => {
         neuralModelPath: MODEL_PATH,
         expertSims: 8,
         expertDeterminizations: 1,
-        expertMaxMs: 500,
+        expertMaxMs: 3000,
       },
     });
     try {
@@ -60,7 +60,7 @@ describe('neural Expert via shared worker pool', () => {
         seed: 'neural-expert-seed',
         weights,
         budget: {
-          deadlineEpochMs: performance.now() + 500,
+          deadlineEpochMs: performance.now() + 3000,
           maxNodes: 1600,
           beamWidth: 5,
           maxDeterminizations: 1,

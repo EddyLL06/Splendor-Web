@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "modelVersion": "policy-attn-v3",
+  "arch": "attention",
+  "encoderVersion": "entity-obs-462-action-43-v1",
+  "obsDim": 462,
+  "actionDim": 43,
+  "onnxSha256": "2b180cedb16866cade3214abc5cc2381848a7588715309b0760c286011a972f9",
+  "rulesFingerprint": "1ba7ffbd95104d3bdda3bf9942087a720b23d965ac3a059977312e9396e9e192",
+  "createdAt": "2026-08-04T17:11:46Z",
+  "training": {
+    "algorithm": "expert-iteration-search-targets-v1",
+    "rounds": [
+      "neural-s7a-p",
+      "neural-s8a-p",
+      "neural-s9a-p"
+    ],
+    "positions": 535812,
+    "teacher": "bot-tree-puct (96x2 for s7, 64x2 for s8/s9)"
+  },
+  "validation": {
+    "baseline": "hard-v1",
+    "twoPlayerWinRate": 0.795,
+    "twoPlayerGames": 200,
+    "threePlayerWinRate": 0.59,
+    "threePlayerGames": 100,
+    "fourPlayerWinRate": 0.56,
+    "fourPlayerGames": 100,
+    "note": "2p gate reached (>=75%). 3/4p improvements over s6: +11pp / +25pp. 0 illegal moves, 0 deadlocks in all runs."
+  }
+}

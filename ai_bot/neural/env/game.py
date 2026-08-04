@@ -29,6 +29,8 @@ DATA_PATH = os.path.join(
 )
 
 _DATA: Optional[Dict[str, Any]] = None
+_CARD_INDEX: Optional[Dict[str, Dict[str, Any]]] = None
+_NOBLE_INDEX: Optional[Dict[str, Dict[str, Any]]] = None
 
 
 def load_data() -> Dict[str, Any]:
@@ -42,19 +44,19 @@ def load_data() -> Dict[str, Any]:
 def get_card(card_id: Optional[str]) -> Optional[Dict[str, Any]]:
     if card_id is None:
         return None
-    return next(
-        (card for card in load_data()["cards"] if card["id"] == card_id),
-        None,
-    )
+    global _CARD_INDEX
+    if _CARD_INDEX is None:
+        _CARD_INDEX = {card["id"]: card for card in load_data()["cards"]}
+    return _CARD_INDEX.get(card_id)
 
 
 def get_noble(noble_id: Optional[str]) -> Optional[Dict[str, Any]]:
     if noble_id is None:
         return None
-    return next(
-        (noble for noble in load_data()["nobles"] if noble["id"] == noble_id),
-        None,
-    )
+    global _NOBLE_INDEX
+    if _NOBLE_INDEX is None:
+        _NOBLE_INDEX = {noble["id"]: noble for noble in load_data()["nobles"]}
+    return _NOBLE_INDEX.get(noble_id)
 
 
 def cards_for_tier(tier: int) -> List[Dict[str, Any]]:
