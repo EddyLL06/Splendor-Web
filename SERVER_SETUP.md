@@ -270,10 +270,10 @@ AI_BOT_WORKERS=1
 AI_BOT_QUEUE_LIMIT=256
 AI_BOT_HARD_MAX_MS=80
 AI_BOT_EXPERT_ENABLED=true
-AI_BOT_NEURAL_MODEL=ai_bot/models/neural/policy-attn-s6.onnx
+AI_BOT_NEURAL_MODEL=ai_bot/models/neural/policy-attn-v3.onnx
 AI_BOT_EXPERT_SIMS=96
 AI_BOT_EXPERT_DETERMINIZATIONS=2
-AI_BOT_EXPERT_MAX_MS=500
+AI_BOT_EXPERT_MAX_MS=3000
 ```
 
 Important checks before saving:

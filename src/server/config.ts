@@ -276,7 +276,7 @@ export const createConfig = (
     aiBotNeuralModel: resolve(
       projectRoot,
       env.AI_BOT_NEURAL_MODEL?.trim() ||
-        'ai_bot/models/neural/policy-attn-s6.onnx',
+        'ai_bot/models/neural/policy-attn-v3.onnx',
     ),
     aiBotExpertSims: parseInteger(env, 'AI_BOT_EXPERT_SIMS', 96, 1, 10_000),
     aiBotExpertDeterminizations: parseInteger(
@@ -289,7 +289,7 @@ export const createConfig = (
     aiBotExpertMaxMs: parseInteger(
       env,
       'AI_BOT_EXPERT_MAX_MS',
-      500,
+      3000,
       100,
       5000,
     ),

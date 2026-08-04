@@ -50,10 +50,16 @@ export class NeuralPolicy {
   private constructor(private readonly session: ort.InferenceSession) {}
 
   static async load(modelPath: string): Promise<NeuralPolicy> {
-    const session = await ort.InferenceSession.create(modelPath, {
+    const options = {
       executionMode: 'sequential',
       graphOptimizationLevel: 'all',
-    });
+    } as const;
+    const intraOpThreads = Number(process.env.AI_NEURAL_INTRA_OP_THREADS ?? '0');
+    const sessionOptions =
+      Number.isInteger(intraOpThreads) && intraOpThreads > 0
+        ? { ...options, intraOpNumThreads: intraOpThreads }
+        : options;
+    const session = await ort.InferenceSession.create(modelPath, sessionOptions);
     return new NeuralPolicy(session);
   }
 

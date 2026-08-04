@@ -14,6 +14,8 @@ src/generated/prisma/
 *.sqlite-wal
 *.sqlite-journal
 .env
+__pycache__/
+*.pyc
 .DS_Store
 *.log
 spl01_rules.pdf

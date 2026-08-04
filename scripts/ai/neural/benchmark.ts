@@ -68,6 +68,7 @@ const playGame = async (
   search: boolean,
   sims: number,
   determinizations: number,
+  budgetMs: number,
   mode: 'auto' | 'alternating' | 'bot-tree',
 ): Promise<GameResult> => {
   const rng = createSeededRNG(`game:${seed}:${index}`);
@@ -122,7 +123,7 @@ const playGame = async (
             neural,
             mode,
             budget: {
-              deadlineEpochMs: performance.now() + 500,
+              deadlineEpochMs: performance.now() + budgetMs,
               simsPerDeterminization: sims,
               determinizations,
             },
@@ -178,6 +179,10 @@ const main = async (): Promise<void> => {
     values.get('output') ?? `.local-data/ai-bot/runs/neural-${seed}`,
   );
   const maxActions = Number(values.get('max-actions') ?? '3000');
+  const budgetMs = Number(values.get('budget-ms') ?? '3000');
+  if (!Number.isFinite(budgetMs) || budgetMs <= 0) {
+    throw new Error('--budget-ms must be a positive number of milliseconds.');
+  }
   const search = values.get('search') === 'true';
   const sims = Number(values.get('sims') ?? '96');
   const determinizations = Number(values.get('determinizations') ?? '2');
@@ -221,6 +226,7 @@ const main = async (): Promise<void> => {
         search,
         sims,
         determinizations,
+        budgetMs,
         mode,
       ),
     );
@@ -261,6 +267,7 @@ const main = async (): Promise<void> => {
     seed,
     games,
     players,
+    budgetMs,
     model: modelPath,
     byPlayers,
     elapsedSec: Math.round(elapsedSec * 100) / 100,

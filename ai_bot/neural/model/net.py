@@ -57,7 +57,9 @@ class PolicyValueNet(nn.Module):
             [state_expanded, action_h, state_expanded * action_h], dim=-1
         )
         logits = self.policy_head(combined).squeeze(-1)  # (B, A)
-        logits = logits.masked_fill(action_mask == 0, float("-inf"))
+        # Finite large-negative mask keeps fp16 gradients stable while making
+        # padded actions' softmax probability effectively zero.
+        logits = logits.masked_fill(action_mask == 0, float("-1e4"))
         value = self.value_head(state_h).squeeze(-1)  # (B,)
         return logits, value
 
@@ -152,6 +154,6 @@ class PolicyValueNetAttention(nn.Module):
             [state_expanded, action_h, state_expanded * action_h], dim=-1
         )
         logits = self.policy_head(combined).squeeze(-1)
-        logits = logits.masked_fill(action_mask == 0, float("-inf"))
+        logits = logits.masked_fill(action_mask == 0, float("-1e4"))
         value = self.value_head(state_h).squeeze(-1)
         return logits, value

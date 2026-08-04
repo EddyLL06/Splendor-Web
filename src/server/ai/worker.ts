@@ -61,7 +61,7 @@ parentPort?.on(
   try {
     if (message.mode === 'expert') {
       const neural = await getNeuralPolicy();
-      const expertMaxMs = config.expertMaxMs ?? 500;
+      const expertMaxMs = config.expertMaxMs ?? 3000;
       // The deadline sent by the controller can expire while the model is
       // loading or under CPU pressure. Always give the search a fresh full
       // window measured from when it actually starts.
