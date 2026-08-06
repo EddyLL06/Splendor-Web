@@ -215,6 +215,7 @@ describe('action log purchase card preview', () => {
 
     const chip = screen.getByRole('button', { name: card.id });
     expect(chip.classList.contains('reserved-summary')).toBe(true);
+    expect(screen.queryByText('logs.purchase')).toBeNull();
 
     await userEvent.hover(chip);
     const preview = await screen.findByRole('tooltip');
@@ -248,9 +249,61 @@ describe('action log purchase card preview', () => {
     expect(
       screen.getByRole('button', { name: card.id }).classList.contains('reserved-summary'),
     ).toBe(true);
+    expect(screen.queryByText('logs.purchase')).toBeNull();
   });
 
-  it('does not add a preview chip to non-purchase log entries', () => {
+  it('replaces public reserve log text with a card chip', () => {
+    const card = DEVELOPMENT_CARDS[1];
+    const state = createTestState();
+    state.actionLog = [
+      {
+        id: 1,
+        kind: 'reserve',
+        message: `Host reserved public card ${card.id}.`,
+        i18n: { key: 'reservePublic', values: { playerID: '0', card: card.id } },
+        animation: {
+          type: 'market-card',
+          action: 'reserve',
+          playerID: '0',
+          tier: card.tier,
+          slotIndex: 0,
+          cardId: card.id,
+          replacementCardId: null,
+        },
+      },
+    ];
+    state.nextLogID = 2;
+
+    renderBoard(state);
+
+    expect(
+      screen.getByRole('button', { name: card.id }).classList.contains('reserved-summary'),
+    ).toBe(true);
+    expect(screen.queryByText('logs.reservePublic')).toBeNull();
+  });
+
+  it('replaces blind reserve log text with a hidden tier chip', () => {
+    const state = createTestState();
+    state.actionLog = [
+      {
+        id: 1,
+        kind: 'reserve',
+        message: 'Host reserved a hidden tier 2 card.',
+        i18n: { key: 'reserveHidden', values: { playerID: '0', tier: 2 } },
+        animation: { type: 'reserve-deck', playerID: '0', tier: 2 },
+      },
+    ];
+    state.nextLogID = 2;
+
+    renderBoard(state);
+
+    const hidden = document.querySelector('.action-log .reserved-summary-hidden');
+    expect(hidden).not.toBeNull();
+    expect(hidden?.textContent).toBe('game.hiddenTier');
+    expect(screen.queryByText('logs.reserveHidden')).toBeNull();
+  });
+
+  it('does not add a preview chip to non-card log entries', () => {
     const state = createTestState();
     state.actionLog = [
       {
