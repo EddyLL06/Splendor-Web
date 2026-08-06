@@ -8,6 +8,8 @@ import { GameBoard, type GameBoardProps } from '../src/client/components/GameBoa
 import { SpectatorPopover } from '../src/client/components/SpectatorPopover.js';
 import type { AuthenticatedLobbyClient } from '../src/client/lobby-client.js';
 import { WaitingRoom } from '../src/client/screens/WaitingRoom.js';
+import { DEVELOPMENT_CARDS } from '../src/shared/data/gameData.js';
+import type { SplendorState } from '../src/shared/types/game.js';
 import type { PublicRoomState, RoomMatch } from '../src/shared/types/room.js';
 import { createTestState } from './helpers.js';
 
@@ -158,5 +160,110 @@ describe('spectator UI boundaries', () => {
     expect(document.querySelector('.reserved-column')).toBeNull();
     expect(document.querySelector('.your-turn-popup')).toBeNull();
     expect(document.querySelector('.local-turn-active')).toBeNull();
+  });
+});
+
+describe('action log purchase card preview', () => {
+  const renderBoard = (state: SplendorState) =>
+    render(
+      <GameBoard
+        {...({
+          G: state,
+          ctx: { currentPlayer: '0' },
+          moves: {
+            mainAction: vi.fn(),
+            discardTokens: vi.fn(),
+            chooseNoble: vi.fn(),
+          },
+          matchID: 'match-1',
+          playerID: null,
+          isConnected: true,
+          playerNames: { '0': 'Host', '1': 'Player' },
+          playerAvatars: { '0': '', '1': '' },
+          accountMenu: null,
+          sessionMode: 'spectator',
+          room: { ...room, startedAt: 123 },
+          onLeaveMatch: vi.fn(),
+          onReturnToLobby: vi.fn(),
+        } as unknown as GameBoardProps)}
+      />,
+    );
+
+  it('renders a reserved-style chip for purchased cards and previews the card on hover', async () => {
+    const card = DEVELOPMENT_CARDS[0];
+    const state = createTestState();
+    state.actionLog = [
+      {
+        id: 1,
+        kind: 'purchase',
+        message: `Host purchased ${card.id}.`,
+        i18n: { key: 'purchase', values: { playerID: '0', card: card.id } },
+        animation: {
+          type: 'market-card',
+          action: 'purchase',
+          playerID: '0',
+          tier: card.tier,
+          slotIndex: 0,
+          cardId: card.id,
+          replacementCardId: null,
+        },
+      },
+    ];
+    state.nextLogID = 2;
+
+    renderBoard(state);
+
+    const chip = screen.getByRole('button', { name: card.id });
+    expect(chip.classList.contains('reserved-summary')).toBe(true);
+
+    await userEvent.hover(chip);
+    const preview = await screen.findByRole('tooltip');
+    expect(preview.querySelector('.development-card')).not.toBeNull();
+    expect(preview.textContent).toContain(card.id);
+
+    await userEvent.unhover(chip);
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+  });
+
+  it('shows a chip for purchases made from reserved cards', () => {
+    const card = DEVELOPMENT_CARDS[0];
+    const state = createTestState();
+    state.actionLog = [
+      {
+        id: 1,
+        kind: 'purchase',
+        message: `Host purchased ${card.id}.`,
+        i18n: { key: 'purchase', values: { playerID: '0', card: card.id } },
+        animation: {
+          type: 'reserved-purchase',
+          playerID: '0',
+          cardId: card.id,
+        },
+      },
+    ];
+    state.nextLogID = 2;
+
+    renderBoard(state);
+
+    expect(
+      screen.getByRole('button', { name: card.id }).classList.contains('reserved-summary'),
+    ).toBe(true);
+  });
+
+  it('does not add a preview chip to non-purchase log entries', () => {
+    const state = createTestState();
+    state.actionLog = [
+      {
+        id: 1,
+        kind: 'tokens',
+        message: 'Host took one white token.',
+        i18n: { key: 'different', values: { playerID: '0', colors: ['white'] } },
+      },
+    ];
+    state.nextLogID = 2;
+
+    renderBoard(state);
+
+    expect(document.querySelectorAll('.action-log .reserved-summary')).toHaveLength(0);
   });
 });
