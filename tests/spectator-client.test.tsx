@@ -31,8 +31,13 @@ vi.mock('../src/client/components/AccountMenu.js', () => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, values?: Record<string, unknown>) =>
-      values?.count === undefined ? key : `${key}:${values.count}`,
+    t: (key: string, values?: Record<string, unknown>) => {
+      if (!values) return key;
+      if (values.count !== undefined) return `${key}:${values.count}`;
+      const player = typeof values.player === 'string' ? ` ${values.player}` : '';
+      const card = typeof values.card === 'string' ? ` ${values.card}` : '';
+      return `${key}${player}${card}`;
+    },
   }),
 }));
 
@@ -215,7 +220,10 @@ describe('action log purchase card preview', () => {
 
     const chip = screen.getByRole('button', { name: card.id });
     expect(chip.classList.contains('reserved-summary')).toBe(true);
-    expect(screen.queryByText('logs.purchase')).toBeNull();
+    const body = document.querySelector('.action-log .log-entry-body');
+    expect(body?.childNodes[0]?.textContent).toBe('logs.purchase Host ');
+    expect(body?.childNodes[1]).toBe(chip);
+    expect(body?.childNodes.length).toBe(2);
 
     await userEvent.hover(chip);
     const preview = await screen.findByRole('tooltip');
@@ -249,7 +257,9 @@ describe('action log purchase card preview', () => {
     expect(
       screen.getByRole('button', { name: card.id }).classList.contains('reserved-summary'),
     ).toBe(true);
-    expect(screen.queryByText('logs.purchase')).toBeNull();
+    const body = document.querySelector('.action-log .log-entry-body');
+    expect(body?.childNodes[0]?.textContent).toBe('logs.purchase Host ');
+    expect(body?.childNodes.length).toBe(2);
   });
 
   it('replaces public reserve log text with a card chip', () => {
@@ -279,10 +289,12 @@ describe('action log purchase card preview', () => {
     expect(
       screen.getByRole('button', { name: card.id }).classList.contains('reserved-summary'),
     ).toBe(true);
-    expect(screen.queryByText('logs.reservePublic')).toBeNull();
+    const body = document.querySelector('.action-log .log-entry-body');
+    expect(body?.childNodes[0]?.textContent).toBe('logs.reservePublic Host ');
+    expect(body?.childNodes.length).toBe(2);
   });
 
-  it('replaces blind reserve log text with a hidden tier chip', () => {
+  it('keeps blind reserve log text without a card chip', () => {
     const state = createTestState();
     state.actionLog = [
       {
@@ -297,10 +309,9 @@ describe('action log purchase card preview', () => {
 
     renderBoard(state);
 
-    const hidden = document.querySelector('.action-log .reserved-summary-hidden');
-    expect(hidden).not.toBeNull();
-    expect(hidden?.textContent).toBe('game.hiddenTier');
-    expect(screen.queryByText('logs.reserveHidden')).toBeNull();
+    const body = document.querySelector('.action-log .log-entry-body');
+    expect(body?.textContent).toBe('logs.reserveHidden Host');
+    expect(document.querySelectorAll('.action-log .reserved-summary')).toHaveLength(0);
   });
 
   it('does not add a preview chip to non-card log entries', () => {

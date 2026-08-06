@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -681,21 +682,6 @@ const reservedCardId = (entry: ActionLogEntry): string | null => {
   return null;
 };
 
-const logCard = (entry: ActionLogEntry): DevelopmentCard | null => {
-  const cardId = entry.kind === 'purchase'
-    ? purchasedCardId(entry)
-    : entry.kind === 'reserve'
-      ? reservedCardId(entry)
-      : null;
-  return cardId ? getCard(cardId) ?? null : null;
-};
-
-const logCardTier = (entry: ActionLogEntry): Tier | null => {
-  const animation = entry.animation;
-  if (animation?.type === 'reserve-deck') return animation.tier;
-  return logCard(entry)?.tier ?? null;
-};
-
 export function GameBoard(props: GameBoardProps) {
   const { t } = useTranslation();
   const {
@@ -1055,22 +1041,33 @@ export function GameBoard(props: GameBoardProps) {
               </div>
               <ol className="action-log">
                 {[...G.actionLog].reverse().map((entry) => {
-                  const showCardChip = entry.kind === 'purchase' || entry.kind === 'reserve';
-                  const card = showCardChip ? logCard(entry) : null;
-                  const tier = showCardChip ? logCardTier(entry) : null;
+                  const cardId = entry.kind === 'purchase'
+                    ? purchasedCardId(entry)
+                    : entry.kind === 'reserve'
+                      ? reservedCardId(entry)
+                      : null;
+                  const card = cardId ? getCard(cardId) : null;
+                  const message = formatActionLog(entry, t, playerNames);
                   return (
                     <li key={entry.id}>
                       <span className={`log-dot log-${entry.kind}`} />
                       <span className="log-entry-body">
-                        {showCardChip && tier ? (
-                          <ReservedCardSummary
-                            cardId={card?.id ?? null}
-                            tier={tier}
-                            ownerID={`log-${entry.id}`}
-                            index={entry.id}
-                          />
+                        {card ? (
+                          message.split(card.id).map((part, index, parts) => (
+                            <Fragment key={index}>
+                              {part}
+                              {index < parts.length - 1 && (
+                                <ReservedCardSummary
+                                  cardId={card.id}
+                                  tier={card.tier}
+                                  ownerID={`log-${entry.id}`}
+                                  index={entry.id}
+                                />
+                              )}
+                            </Fragment>
+                          ))
                         ) : (
-                          formatActionLog(entry, t, playerNames)
+                          message
                         )}
                       </span>
                     </li>
