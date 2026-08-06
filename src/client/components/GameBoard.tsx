@@ -673,6 +673,29 @@ const purchasedCardId = (entry: ActionLogEntry): string | null => {
   return null;
 };
 
+const reservedCardId = (entry: ActionLogEntry): string | null => {
+  const animation = entry.animation;
+  if (animation?.type === 'market-card' && animation.action === 'reserve') {
+    return animation.cardId;
+  }
+  return null;
+};
+
+const logCard = (entry: ActionLogEntry): DevelopmentCard | null => {
+  const cardId = entry.kind === 'purchase'
+    ? purchasedCardId(entry)
+    : entry.kind === 'reserve'
+      ? reservedCardId(entry)
+      : null;
+  return cardId ? getCard(cardId) ?? null : null;
+};
+
+const logCardTier = (entry: ActionLogEntry): Tier | null => {
+  const animation = entry.animation;
+  if (animation?.type === 'reserve-deck') return animation.tier;
+  return logCard(entry)?.tier ?? null;
+};
+
 export function GameBoard(props: GameBoardProps) {
   const { t } = useTranslation();
   const {
@@ -1032,20 +1055,22 @@ export function GameBoard(props: GameBoardProps) {
               </div>
               <ol className="action-log">
                 {[...G.actionLog].reverse().map((entry) => {
-                  const cardId = entry.kind === 'purchase' ? purchasedCardId(entry) : null;
-                  const card = cardId ? getCard(cardId) : null;
+                  const showCardChip = entry.kind === 'purchase' || entry.kind === 'reserve';
+                  const card = showCardChip ? logCard(entry) : null;
+                  const tier = showCardChip ? logCardTier(entry) : null;
                   return (
                     <li key={entry.id}>
                       <span className={`log-dot log-${entry.kind}`} />
                       <span className="log-entry-body">
-                        {formatActionLog(entry, t, playerNames)}
-                        {card && (
+                        {showCardChip && tier ? (
                           <ReservedCardSummary
-                            cardId={card.id}
-                            tier={card.tier}
+                            cardId={card?.id ?? null}
+                            tier={tier}
                             ownerID={`log-${entry.id}`}
                             index={entry.id}
                           />
+                        ) : (
+                          formatActionLog(entry, t, playerNames)
                         )}
                       </span>
                     </li>
