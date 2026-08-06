@@ -17,7 +17,7 @@ import {
   NORMAL_COLORS,
   TOKEN_COLORS,
 } from '../../shared/constants/colors.js';
-import { requireCard, requireNoble } from '../../shared/data/gameData.js';
+import { getCard, requireCard, requireNoble } from '../../shared/data/gameData.js';
 import { applyMainAction } from '../../shared/rules/engine.js';
 import {
   analyzePayment,
@@ -26,11 +26,11 @@ import {
   totalTokens,
 } from '../../shared/rules/selectors.js';
 import type {
+  ActionLogEntry,
   ActionAnimation,
   CardLocation,
   DevelopmentCard,
   MainAction,
-  ReservedDevelopmentCard,
   SplendorState,
   Tier,
   TokenColor,
@@ -143,11 +143,13 @@ const flightStyle = (flight: CardFlight): CSSProperties =>
   }) as CSSProperties;
 
 function ReservedCardSummary({
-  reserved,
+  cardId,
+  tier,
   ownerID,
   index,
 }: {
-  reserved: ReservedDevelopmentCard;
+  cardId: string | null;
+  tier: Tier;
   ownerID: string;
   index: number;
 }) {
@@ -156,8 +158,8 @@ function ReservedCardSummary({
   const popoverRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<PopoverPosition>({ top: 12, left: 12 });
-  const visible = canShowReservedCardDetails(reserved.cardId);
-  const card = visible && reserved.cardId ? requireCard(reserved.cardId) : null;
+  const visible = canShowReservedCardDetails(cardId);
+  const card = visible && cardId ? requireCard(cardId) : null;
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -202,7 +204,7 @@ function ReservedCardSummary({
   if (!card) {
     return (
       <span className="reserved-summary reserved-summary-hidden">
-        {t('game.hiddenTier', { tier: reserved.tier })}
+        {t('game.hiddenTier', { tier })}
       </span>
     );
   }
@@ -333,7 +335,8 @@ function PlayerSummary({
           player.reservedCards.map((reserved, index) => (
             <ReservedCardSummary
               key={`${reserved.tier}-${reserved.cardId ?? `hidden-${index}`}`}
-              reserved={reserved}
+              cardId={reserved.cardId}
+              tier={reserved.tier}
               ownerID={id}
               index={index}
             />
@@ -657,6 +660,17 @@ const animationOriginKeys = (animation: ActionAnimation): string[] => {
     `reserved-summary-${animation.playerID}-${animation.cardId}`,
     `player-${animation.playerID}`,
   ];
+};
+
+const purchasedCardId = (entry: ActionLogEntry): string | null => {
+  const animation = entry.animation;
+  if (animation?.type === 'market-card' && animation.action === 'purchase') {
+    return animation.cardId;
+  }
+  if (animation?.type === 'reserved-purchase') {
+    return animation.cardId;
+  }
+  return null;
 };
 
 export function GameBoard(props: GameBoardProps) {
@@ -1017,12 +1031,26 @@ export function GameBoard(props: GameBoardProps) {
                 </div>
               </div>
               <ol className="action-log">
-                {[...G.actionLog].reverse().map((entry) => (
-                  <li key={entry.id}>
-                    <span className={`log-dot log-${entry.kind}`} />
-                    {formatActionLog(entry, t, playerNames)}
-                  </li>
-                ))}
+                {[...G.actionLog].reverse().map((entry) => {
+                  const cardId = entry.kind === 'purchase' ? purchasedCardId(entry) : null;
+                  const card = cardId ? getCard(cardId) : null;
+                  return (
+                    <li key={entry.id}>
+                      <span className={`log-dot log-${entry.kind}`} />
+                      <span className="log-entry-body">
+                        {formatActionLog(entry, t, playerNames)}
+                        {card && (
+                          <ReservedCardSummary
+                            cardId={card.id}
+                            tier={card.tier}
+                            ownerID={`log-${entry.id}`}
+                            index={entry.id}
+                          />
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
                 {G.actionLog.length === 0 && <li className="empty-copy">{t('game.firstMove')}</li>}
               </ol>
             </section>

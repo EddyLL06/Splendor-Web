@@ -1555,6 +1555,19 @@ h2 {
   gap: 8px;
 }
 
+.log-entry-body {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.log-entry-body .reserved-summary {
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+
 .log-dot {
   width: 7px;
   height: 7px;
