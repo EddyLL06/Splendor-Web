@@ -83,6 +83,7 @@ export const runGame = (
   seed: string,
   maxActions: number,
   weightsByAgent: Partial<Record<AgentPolicyID, Record<string, number>>> = {},
+  budgetMsByAgent: Partial<Record<AgentPolicyID, number>> = {},
 ): GameOutcome => {
   const rng = createSeededRNG(`game:${seed}:${index}`);
   const initialState = createInitialState(numPlayers, {
@@ -126,6 +127,7 @@ export const runGame = (
       'normal-v1': createDecisionStats(),
       'hard-v1': createDecisionStats(),
       'expert-v1': createDecisionStats(),
+      'ds-search-v1': createDecisionStats(),
     },
   };
 
@@ -149,6 +151,7 @@ export const runGame = (
         policy: agent,
         seed: decisionSeed,
         weights: weightsByAgent[agent],
+        budgetMs: budgetMsByAgent[agent],
         memory,
       });
     } catch (caught) {

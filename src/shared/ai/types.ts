@@ -21,6 +21,7 @@ export const AI_AGENTS = [
   'normal-v1',
   'hard-v1',
   'expert-v1',
+  'ds-search-v1',
 ] as const;
 export type AgentPolicyID = (typeof AI_AGENTS)[number];
 
@@ -35,6 +36,14 @@ export interface SearchBudget {
   beamWidth: number;
   maxDeterminizations: number;
   maxSimulations: number;
+  /**
+   * ds-search worker-slice fields: total determinizations plus this
+   * worker's [detIndex, detIndex + detCount) slice. Optional so the beam /
+   * micro-mcts budgets keep their original shape.
+   */
+  determinizations?: number;
+  detIndex?: number;
+  detCount?: number;
 }
 
 export interface BotDecision {

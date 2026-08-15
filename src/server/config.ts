@@ -278,20 +278,20 @@ export const createConfig = (
       env.AI_BOT_NEURAL_MODEL?.trim() ||
         'ai_bot/models/neural/policy-attn-v3.onnx',
     ),
-    aiBotExpertSims: parseInteger(env, 'AI_BOT_EXPERT_SIMS', 96, 1, 10_000),
+    aiBotExpertSims: parseInteger(env, 'AI_BOT_EXPERT_SIMS', 200_000, 1, 100_000_000),
     aiBotExpertDeterminizations: parseInteger(
       env,
       'AI_BOT_EXPERT_DETERMINIZATIONS',
-      2,
+      9,
       1,
-      8,
+      64,
     ),
     aiBotExpertMaxMs: parseInteger(
       env,
       'AI_BOT_EXPERT_MAX_MS',
-      3000,
-      100,
       5000,
+      100,
+      15000,
     ),
     defaultLocale: 'en',
   };

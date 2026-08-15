@@ -59,9 +59,11 @@ const main = async (): Promise<void> => {
   const candidatePolicy = (values.get('policy') ?? 'normal-v1') as
     | 'normal-v1'
     | 'hard-v1'
-    | 'expert-v1';
+    | 'expert-v1'
+    | 'ds-search-v1';
   const baseline = values.get('baseline') ?? 'uniform-random-v1';
   const rotateSeats = values.get('rotate-seats') !== 'false';
+  const dsBudget = Number(values.get('ds-budget') ?? '1000');
   const output = resolve(
     values.get('output') ?? `.local-data/ai-bot/runs/bench-${seed}`,
   );
@@ -71,9 +73,10 @@ const main = async (): Promise<void> => {
   if (
     candidatePolicy !== 'normal-v1' &&
     candidatePolicy !== 'hard-v1' &&
-    candidatePolicy !== 'expert-v1'
+    candidatePolicy !== 'expert-v1' &&
+    candidatePolicy !== 'ds-search-v1'
   ) {
-    throw new Error('--policy must be normal-v1, hard-v1 or expert-v1.');
+    throw new Error('--policy must be normal-v1, hard-v1, expert-v1 or ds-search-v1.');
   }
   if (players.some((count) => ![2, 3, 4].includes(count))) {
     throw new Error('--players must be 2,3 and/or 4.');
@@ -138,7 +141,9 @@ const main = async (): Promise<void> => {
       weightsByAgent[baselineAgent] = baselineWeights ?? candidateWeights;
     }
     results.push(
-      runGame(index, numPlayers, agentOrder, `${seed}:bench`, maxActions, weightsByAgent),
+      runGame(index, numPlayers, agentOrder, `${seed}:bench`, maxActions, weightsByAgent, {
+        'ds-search-v1': dsBudget,
+      }),
     );
     if ((index + 1) % progressEvery === 0) {
       process.stdout.write(`games ${index + 1}/${games}\n`);
