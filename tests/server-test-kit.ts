@@ -47,6 +47,8 @@ export const createTestConfig = (root: string, overrides: NodeJS.ProcessEnv = {}
       VERIFICATION_CODE_MAX_ATTEMPTS: '5',
       AI_BOT_WORKERS: '0',
       AI_BOT_ENABLED: 'true',
+      // Keep expert searches fast in tests (inline mode, no worker pool).
+      AI_BOT_EXPERT_MAX_MS: '800',
       ...overrides,
     },
     projectRoot,

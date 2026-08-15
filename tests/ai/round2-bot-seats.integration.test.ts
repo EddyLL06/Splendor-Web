@@ -240,6 +240,38 @@ describe('round 2: bot seats, lifecycle and Easy bot play', () => {
     );
   }, 30_000);
 
+  it('the Expert bot (ds-search) plays through the authoritative chain', async () => {
+    const matchID = await createMatch(alice);
+    const joined = await joinSeat(alice, matchID, '0');
+    await addBot(alice, matchID, '1', 'expert');
+    await alice.agent
+      .post(`/api/matches/${matchID}/start`)
+      .set(mutate(alice))
+      .expect(200);
+
+    const access = await alice.agent
+      .post(`/api/matches/${matchID}/access-ticket`)
+      .set(mutate(alice))
+      .send({
+        role: 'player',
+        playerID: '0',
+        credentials: joined.body.playerCredentials,
+      })
+      .expect(200);
+    const aliceClient = connectPlayer(
+      matchID,
+      '0',
+      joined.body.playerCredentials as string,
+      access.body.accessTicket as string,
+    );
+    await waitFor(() => Boolean(aliceClient.getState()?.isConnected));
+    const before = aliceClient.getState()!._stateID;
+    await waitForBotMove(aliceClient);
+    const after = aliceClient.getState()!;
+    expect(after._stateID).toBeGreaterThan(before);
+    expect(after.G.actionLog.length).toBeGreaterThan(0);
+  }, 30_000);
+
   it('rematch retains bot seats and difficulty, then the new bot plays', async () => {
     const matchID = await createMatch(alice);
     const joined = await joinSeat(alice, matchID, '0');
