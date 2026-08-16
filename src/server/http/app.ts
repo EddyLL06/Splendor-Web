@@ -9,6 +9,7 @@ import { koaBody, type ScalarOrArrayFiles } from 'koa-body';
 import { Server as BoardgameServer } from 'boardgame.io/dist/cjs/server.js';
 
 import { SplendorGame } from '../../game/SplendorGame.js';
+import type { SplendorState } from '../../shared/types/game.js';
 import type { AppConfig } from '../config.js';
 import { createDatabase, type Database } from '../database/client.js';
 import { createEmailService, FakeEmailService, type EmailService } from '../email/index.js';
@@ -35,6 +36,10 @@ import { BotCoordinator } from '../ai/bot-coordinator.js';
 import { isBotSeatMetadata } from '../ai/bot-seat.js';
 import { AiWorkerPool, workerEntryFor } from '../ai/worker-pool.js';
 import { AiMetrics } from '../ai/metrics.js';
+import {
+  BotTraceStore,
+  buildBotTraceSnapshot,
+} from '../ai/bot-trace.js';
 import { HAND_TUNED_WEIGHTS } from '../../shared/ai/models/default.js';
 import { parseModel, weightsFromModel } from '../../shared/ai/models/schema.js';
 import { rulesFingerprintOrNull } from '../../shared/ai/models/fingerprint.js';
@@ -204,6 +209,7 @@ export const createGemCouncilApplication = async (
   );
   const aiMetrics = new AiMetrics();
   const aiModel = loadAiModel(config.projectRoot);
+  const botTraceStore = new BotTraceStore();
   const botCoordinator = new BotCoordinator({
     db: matchStore,
     rooms,
@@ -211,6 +217,7 @@ export const createGemCouncilApplication = async (
     config,
     weights: aiModel.weights,
     metrics: aiMetrics,
+    traceStore: botTraceStore,
   });
   const aiPool = new AiWorkerPool({
     workerCount: config.aiBotEnabled ? config.aiBotWorkers : 0,
@@ -234,6 +241,7 @@ export const createGemCouncilApplication = async (
   rooms.setDeletionHandler((matchID) => {
     socketTransport.disconnectMatch(matchID);
     botCoordinator.stopMatch(matchID);
+    botTraceStore.clear(matchID);
   });
   const boardgame = BoardgameServer({
     games: [SplendorGame],
@@ -690,6 +698,51 @@ export const createGemCouncilApplication = async (
         ctx.body = await lobby.removeBot(authenticated, matchID, playerID);
         return;
       }
+    }
+
+    const botTraceRoute = routeMatch(
+      ctx.path,
+      /^\/api\/matches\/([^/]+)\/bot-trace$/,
+    );
+    if (ctx.method === 'GET' && botTraceRoute) {
+      const authenticated = requireSession(session);
+      const matchID = decodePathSegment(botTraceRoute[1]);
+      // Only participants may read the bot's thinking: players and
+      // spectators of the room; nobody else.
+      const room = await lobby.get(authenticated, matchID);
+      if (room.viewer.role === 'none') {
+        throw new ApiError(403, 'FORBIDDEN');
+      }
+      rateLimiter.consume(`bot-trace:${authenticated.user.id}:${matchID}`, {
+        limit: 240,
+        windowMs: 60_000,
+      });
+      const stored = await matchStore.fetch(matchID, { state: true });
+      const gameState = stored.state as unknown as
+        | {
+            G: SplendorState;
+            ctx: { currentPlayer: string; [key: string]: unknown };
+            _stateID?: number;
+          }
+        | undefined;
+      ctx.body = {
+        matchID,
+        botPlayerID:
+          room.players.find((player) => player.kind === 'bot') !== undefined
+            ? String(
+                room.players.find((player) => player.kind === 'bot')!.id,
+              )
+            : null,
+        entries: botTraceStore.forMatch(matchID),
+        snapshot: gameState
+          ? buildBotTraceSnapshot(
+              gameState.G,
+              String(gameState.ctx.currentPlayer),
+              gameState._stateID ?? 0,
+            )
+          : null,
+      };
+      return;
     }
 
     ctx.status = 404;

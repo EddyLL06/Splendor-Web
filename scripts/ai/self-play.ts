@@ -99,8 +99,10 @@ const main = async (): Promise<void> => {
       runGame(index, numPlayers, agentOrder, seed, maxActions, {
         'normal-v1': weights,
         'ds-search-v1': weights,
+        'ds-search-v2': weights,
       }, {
         'ds-search-v1': Number(values.get('ds-budget') ?? '1000'),
+        'ds-search-v2': Number(values.get('ds-budget') ?? '1000'),
         'expert-v1': Number(values.get('expert-budget') ?? '180'),
       }),
     );

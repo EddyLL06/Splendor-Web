@@ -11,6 +11,7 @@ import type { BotSeatMetadata } from './bot-seat.js';
 import { BotController } from './bot-controller.js';
 import type { AiWorkerPool } from './worker-pool.js';
 import type { AiMetrics } from './metrics.js';
+import type { BotTraceStore } from './bot-trace.js';
 import { shortHash } from './sanitize.js';
 
 const BOT_TICKET_TTL_MS = 12 * 60 * 60_000;
@@ -27,6 +28,7 @@ export class BotCoordinator {
       config: AppConfig;
       weights: Record<string, number>;
       metrics?: AiMetrics;
+      traceStore?: BotTraceStore;
     },
   ) {}
 
@@ -73,6 +75,7 @@ export class BotCoordinator {
         expertDeterminizations:
           this.dependencies.config.aiBotExpertDeterminizations,
         metrics: this.dependencies.metrics,
+        traceStore: this.dependencies.traceStore,
         onError: (error) => {
           console.error(
             `[bot-controller] match=${shortHash(matchID)} seat=${seatID}: ${

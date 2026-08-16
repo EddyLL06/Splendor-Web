@@ -161,6 +161,7 @@ describe('mergeDsSearchResults', () => {
     const merged = mergeDsSearchResults(
       [mkDecision({ move: 'chooseNoble', args: ['n1'] }), mkDecision({ move: 'chooseNoble', args: ['n2'] })],
       'merge-seed',
+      2,
     );
     expect(merged.policy).toBe('ds-search-v1');
     // b has 20 visits / valueSum 16 (mean 0.8) vs a 20 visits / 10 (0.5).

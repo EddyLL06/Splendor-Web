@@ -270,6 +270,23 @@ describe('round 2: bot seats, lifecycle and Easy bot play', () => {
     const after = aliceClient.getState()!;
     expect(after._stateID).toBeGreaterThan(before);
     expect(after.G.actionLog.length).toBeGreaterThan(0);
+
+    // The bot's thinking is exposed to participants on the trace endpoint.
+    const trace = await alice.agent
+      .get(`/api/matches/${matchID}/bot-trace`)
+      .expect(200);
+    expect(trace.body.matchID).toBe(matchID);
+    expect(trace.body.entries.length).toBeGreaterThan(0);
+    const latest = trace.body.entries[trace.body.entries.length - 1];
+    expect(latest.policy).toBe('ds-search-v1');
+    expect(latest.sims).toBeGreaterThan(0);
+    expect(latest.topActions.length).toBeGreaterThan(0);
+    expect(latest.topActions[0].visits).toBeGreaterThan(0);
+    expect(trace.body.snapshot).not.toBeNull();
+    expect(Object.keys(trace.body.snapshot.players).length).toBe(2);
+
+    // Non-participants cannot read the bot's thinking.
+    await bob.agent.get(`/api/matches/${matchID}/bot-trace`).expect(403);
   }, 30_000);
 
   it('rematch retains bot seats and difficulty, then the new bot plays', async () => {

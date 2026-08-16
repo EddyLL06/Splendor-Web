@@ -155,9 +155,35 @@ export const chooseBotMove = (
     validateMove(fullState, observation.playerID, ctx, decision);
     return decision;
   }
-  if (options.policy === 'ds-search-v1') {
+  if (
+    options.policy === 'ds-search-v1' ||
+    options.policy === 'ds-search-v2'
+  ) {
     const budgetMs = options.budgetMs ?? 5_000;
     const determinizations = 6;
+    const v2 = options.policy === 'ds-search-v2';
+    // v2 knobs are env-driven so A/B experiments can isolate each
+    // optimization against the frozen v1 baseline in one process.
+    const v2Leaf =
+      (process.env.DS_V2_LEAF as
+        | 'static'
+        | 'bestply'
+        | 'best2ply'
+        | 'best3ply'
+        | 'auto2'
+        | 'oneply'
+        | undefined) ?? 'best2ply';
+    const v2RootMinVisits = Number(process.env.DS_V2_ROOT_MIN ?? '0');
+    const v2RoundRobin = process.env.DS_V2_RR !== 'false';
+    const v2Dets = Number(process.env.DS_V2_DETS ?? '3');
+    const v2ExploreC = Number(process.env.DS_V2_EXPLORE_C ?? '0.5');
+    const v2Q0Scale = Number(process.env.DS_V2_Q0 ?? '15');
+    const v2PriorTemp = Number(process.env.DS_V2_PRIOR_TEMP ?? '3');
+    const v2Weights = (process.env.DS_V2_WEIGHTS ?? '')
+      .split(',')
+      .filter((value) => value.trim() !== '')
+      .map((value) => Number(value.trim()));
+    const v2SoMcts = process.env.DS_V2_SOMCTS === 'true';
     const result = computeDsSearchDecision({
       observation,
       ctx,
@@ -169,14 +195,24 @@ export const chooseBotMove = (
       budget: {
         deadlineEpochMs: performance.now() + budgetMs,
         maxSimulations: 4_000_000,
-        determinizations,
+        determinizations: v2 ? v2Dets : determinizations,
         detIndex: 0,
-        detCount: determinizations,
+        detCount: v2 ? v2Dets : determinizations,
+        // v1 keeps the original sequential/static-leaf behavior so it can
+        // serve as the frozen baseline for v2 benchmarks.
+        leafMode: v2 ? v2Leaf : 'static',
+        rootMinVisits: v2 ? v2RootMinVisits : 0,
+        roundRobin: v2 ? v2RoundRobin : false,
+        exploreC: v2 ? v2ExploreC : 1.2,
+        q0Scale: v2 ? v2Q0Scale : 15,
+        priorTemp: v2 ? v2PriorTemp : 3,
+        detWeights: v2 && v2Weights.length > 0 ? v2Weights : undefined,
+        soMcts: v2 ? v2SoMcts : false,
       },
       memory: options.memory,
     });
     validateMove(fullState, observation.playerID, ctx, result.decision);
-    return result.decision;
+    return { ...result.decision, policy: options.policy };
   }
   const candidates = enumerateLegalActions(
     fullState,

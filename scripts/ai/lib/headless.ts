@@ -128,6 +128,7 @@ export const runGame = (
       'hard-v1': createDecisionStats(),
       'expert-v1': createDecisionStats(),
       'ds-search-v1': createDecisionStats(),
+      'ds-search-v2': createDecisionStats(),
     },
   };
 
