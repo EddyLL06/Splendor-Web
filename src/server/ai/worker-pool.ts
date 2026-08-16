@@ -2,7 +2,7 @@
  * Server-wide shared Worker Thread pool for Hard decisions
  * (DEVELOPMENT_GUIDE.md §10). Bounded queue, watchdog timeout, worker crash
  * rebuild, structured-clone messages. `workers: 0` runs inline (tests/CI);
- * production defaults to 1-2 threads, hard-capped at 4.
+ * production auto-scales to the plan's vCPUs (config caps at 16).
  */
 
 import { fileURLToPath } from 'node:url';
