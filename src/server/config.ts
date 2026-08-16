@@ -56,21 +56,17 @@ const parseInteger = (
   return value;
 };
 
-const parseAiBotWorkers = (
-  env: NodeJS.ProcessEnv,
-  nodeEnv: string,
-): number => {
+const parseAiBotWorkers = (env: NodeJS.ProcessEnv): number => {
   const raw = env.AI_BOT_WORKERS?.trim() ?? 'auto';
   if (raw === 'auto') {
     const logical = availableParallelism();
-    if (nodeEnv !== 'production') {
-      // Conservative local/test default: dev machines often have many
-      // cores and spawning one worker per core is wasteful there.
-      return Math.max(1, Math.min(4, logical <= 2 ? 1 : 2));
-    }
-    // Production: the search is CPU-bound and scales ~linearly with worker
-    // threads; the main process is idle while it waits for a decision, so
-    // use every core up to 8 vCPUs and keep one core free on larger boxes.
+    // The search is CPU-bound and scales ~linearly with worker threads; the
+    // main process is idle while it waits for a decision, so use every core
+    // up to 8 vCPUs and keep one core free on larger boxes. Deliberately
+    // NODE_ENV-independent: deployments sometimes run with a non-production
+    // NODE_ENV variable and were silently falling back to the conservative
+    // dev rule. Tests pin AI_BOT_WORKERS=0 explicitly; local dev can set an
+    // explicit cap if it wants fewer threads.
     return Math.max(1, Math.min(16, logical <= 8 ? logical : logical - 1));
   }
   const value = Number(raw);
@@ -239,7 +235,7 @@ export const createConfig = (
   // budget and the determinization count default to per-worker values
   // (25k sims / 3 determinizations per worker). Explicit env values always
   // override the adaptive defaults.
-  const aiBotWorkers = parseAiBotWorkers(env, nodeEnv);
+  const aiBotWorkers = parseAiBotWorkers(env);
   const perWorker = Math.max(1, aiBotWorkers);
   const expertSimsRaw = env.AI_BOT_EXPERT_SIMS?.trim();
   const expertSims =
