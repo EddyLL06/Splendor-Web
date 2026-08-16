@@ -281,10 +281,11 @@ export const createConfig = (
     aiBotExpertSims: parseInteger(
       env,
       'AI_BOT_EXPERT_SIMS',
-      // Sized so 3 workers complete the whole planned simulation within the
-      // 5s wall budget (~4.7s at observed throughput), so completed searches
-      // report no timeout; the wall-clock deadline remains the safety net.
-      60_000,
+      // Sized so 3 workers complete the whole planned simulation inside the
+      // wall budget (~7.1s at the observed 12.7k sims/s on the 3-vCPU plan),
+      // so completed searches report no timeout; the wall-clock deadline
+      // remains the safety net.
+      90_000,
       1,
       100_000_000,
     ),
@@ -298,7 +299,7 @@ export const createConfig = (
     aiBotExpertMaxMs: parseInteger(
       env,
       'AI_BOT_EXPERT_MAX_MS',
-      5000,
+      8000,
       100,
       15000,
     ),

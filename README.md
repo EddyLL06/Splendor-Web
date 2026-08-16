@@ -220,9 +220,9 @@ See `.env.example`; it contains names and safe defaults only.
 | `AI_BOT_QUEUE_LIMIT` | `256` | Max queued AI search jobs before fallback |
 | `AI_BOT_HARD_MAX_MS` | `80` | Hard search compute budget per move |
 | `AI_BOT_EXPERT_ENABLED` | `true` | Expert difficulty uses the ds-search engine (PIMC-MCTS) |
-| `AI_BOT_EXPERT_SIMS` | `60000` | Simulation budget for one expert decision (split across workers; sized to finish inside the 5s wall clock — completing it is a clean finish, not a timeout) |
+| `AI_BOT_EXPERT_SIMS` | `90000` | Simulation budget for one expert decision (split across workers; sized to finish inside the 8s wall clock — completing it is a clean finish, not a timeout) |
 | `AI_BOT_EXPERT_DETERMINIZATIONS` | `9` | Seeded hidden-state determinizations per expert decision |
-| `AI_BOT_EXPERT_MAX_MS` | `5000` | Expert search wall-clock budget per move |
+| `AI_BOT_EXPERT_MAX_MS` | `8000` | Expert search wall-clock budget per move |
 | `AI_BOT_NEURAL_MODEL` | *(ignored)* | Legacy ONNX model path; the neural Expert agent is disabled |
 | `DS_LEAF_MODE` | `best2ply` | Leaf value mode: `static`, `bestply`, `best2ply`, `best3ply`, `oneply` |
 | `DS_EXPLORE_C` | `0.5` | PUCT exploration weight (tuned with the best2ply leaves) |
@@ -253,7 +253,7 @@ Design constraints:
   the 15-prestige race), and picks the root move with the best mean value
   across determinizations. Determinizations are split across the worker pool,
   so `AI_BOT_WORKERS=3` on a 3-vCPU Railway service uses all cores for one
-  2-player bot decision within the `AI_BOT_EXPERT_MAX_MS=5000` budget. Expert
+  2-player bot decision within the `AI_BOT_EXPERT_MAX_MS=8000` budget. Expert
   decisions start computing during the presentation "thinking" delay, so a
   move takes ~max(delay, search) instead of the sum. The legacy neural Expert
   (ONNX PUCT) is fully disabled; its files remain in the repo but are never
@@ -293,19 +293,19 @@ match ID, never full match state, hidden card IDs, tickets, or credentials.
 
 The repo ships a Railway-ready container (`Dockerfile` +
 `railway-entrypoint.sh` + nginx template). For the Expert search budget
-(5 s per move on 3 vCPU / 3 GB RAM), provision the service with **3 vCPU /
+(8 s per move on 3 vCPU / 3 GB RAM), provision the service with **3 vCPU /
 3 GB** and set:
 
 ```dotenv
 AI_BOT_WORKERS=3
-AI_BOT_EXPERT_MAX_MS=5000
-AI_BOT_EXPERT_SIMS=60000
+AI_BOT_EXPERT_MAX_MS=8000
+AI_BOT_EXPERT_SIMS=90000
 AI_BOT_EXPERT_DETERMINIZATIONS=9
 ```
 
 With 3 workers, one 2-player expert decision splits its 9 determinizations
-across all cores and stays inside the 5 s wall-clock budget; the search runs
-during the bot's presentation delay, so each bot move takes ~5–6 s wall time.
+across all cores and stays inside the 8 s wall-clock budget; the search runs
+during the bot's presentation delay, so each bot move takes ~8 s wall time.
 Memory stays well under the 3 GB limit (search trees are tiny per node and
 the neural model is never loaded). `AI_BOT_WORKERS=3` is baked into the
 runtime image (Dockerfile `ENV`); no manual Railway variable is needed —
