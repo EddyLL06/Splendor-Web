@@ -72,9 +72,9 @@ parentPort?.on(
       result: computeHardDecision(message.input as HardDecisionInput),
     });
   } catch (error) {
-    post(message.id, {
-      error: error instanceof Error ? error.message : String(error),
-    });
+    const messageText = error instanceof Error ? error.message : String(error);
+    console.error(`[ai-worker] decision request failed: ${messageText}`);
+    post(message.id, { error: messageText });
   }
   },
 );
