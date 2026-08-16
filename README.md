@@ -307,8 +307,11 @@ With 3 workers, one 2-player expert decision splits its 9 determinizations
 across all cores and stays inside the 5 s wall-clock budget; the search runs
 during the bot's presentation delay, so each bot move takes ~5–6 s wall time.
 Memory stays well under the 3 GB limit (search trees are tiny per node and
-the neural model is never loaded). This branch does not perform the actual
-`railway up`; deploy it from the Railway dashboard or CLI as usual.
+the neural model is never loaded). `AI_BOT_WORKERS=3` is baked into the
+runtime image (Dockerfile `ENV`); no manual Railway variable is needed —
+override per service only if you change the plan. This branch does not
+perform the actual `railway up`; deploy it from the Railway dashboard or CLI
+as usual.
 
 ## Security design
 
