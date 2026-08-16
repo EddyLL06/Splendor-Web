@@ -173,6 +173,34 @@ describe('ds-search engine', () => {
     expect(applyDecision(state, playerID, decision.move)).toBe(true);
   });
 
+  it('completing the simulation budget is a clean finish (no timeout flag)', () => {
+    const { state } = createSeededState(2, 'ds-budget-complete');
+    const playerID = state.initialFirstPlayer;
+    const observation = createObservation(
+      createPlayerView(state, playerID),
+      playerID,
+      ctxFor(state, playerID),
+    );
+    const { decision } = computeDsSearchDecision({
+      observation,
+      ctx: ctxFor(state, playerID),
+      seed: 'ds-budget-complete-seed',
+      weights,
+      budget: {
+        deadlineEpochMs: performance.now() + 3_000,
+        maxSimulations: 300,
+        determinizations: 1,
+        detIndex: 0,
+        detCount: 1,
+        roundRobin: true,
+      },
+    });
+    expect(decision.nodesVisited).toBe(300);
+    expect(decision.timedOut).toBe(false);
+    expect(decision.fallbackLevel).toBe(0);
+    expect(applyDecision(state, playerID, decision.move)).toBe(true);
+  });
+
   it('supports shared-root SO-MCTS across determinizations', () => {
     const { state } = createSeededState(2, 'ds-somcts');
     const playerID = state.initialFirstPlayer;

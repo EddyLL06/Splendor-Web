@@ -56,15 +56,26 @@ const parseInteger = (
   return value;
 };
 
-const parseAiBotWorkers = (env: NodeJS.ProcessEnv): number => {
+const parseAiBotWorkers = (
+  env: NodeJS.ProcessEnv,
+  nodeEnv: string,
+): number => {
   const raw = env.AI_BOT_WORKERS?.trim() ?? 'auto';
   if (raw === 'auto') {
     const logical = availableParallelism();
-    return Math.max(1, Math.min(4, logical <= 2 ? 1 : 2));
+    if (nodeEnv !== 'production') {
+      // Conservative local/test default: dev machines often have many
+      // cores and spawning one worker per core is wasteful there.
+      return Math.max(1, Math.min(4, logical <= 2 ? 1 : 2));
+    }
+    // Production: the search is CPU-bound and scales ~linearly with worker
+    // threads; the main process is idle while it waits for a decision, so
+    // use every core up to 8 vCPUs and keep one core free on larger boxes.
+    return Math.max(1, Math.min(16, logical <= 8 ? logical : logical - 1));
   }
   const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value < 0 || value > 4) {
-    throw new Error('AI_BOT_WORKERS must be auto or an integer from 0 to 4.');
+  if (!Number.isSafeInteger(value) || value < 0 || value > 16) {
+    throw new Error('AI_BOT_WORKERS must be auto or an integer from 0 to 16.');
   }
   return value;
 };
@@ -224,6 +235,29 @@ export const createConfig = (
     throw new Error('RESEND_API_KEY is required when EMAIL_PROVIDER=resend.');
   }
 
+  // The search scales ~linearly with worker threads, so the simulation
+  // budget and the determinization count default to per-worker values
+  // (25k sims / 3 determinizations per worker). Explicit env values always
+  // override the adaptive defaults.
+  const aiBotWorkers = parseAiBotWorkers(env, nodeEnv);
+  const perWorker = Math.max(1, aiBotWorkers);
+  const expertSimsRaw = env.AI_BOT_EXPERT_SIMS?.trim();
+  const expertSims =
+    expertSimsRaw === undefined || expertSimsRaw === ''
+      ? 25_000 * perWorker
+      : Number(expertSimsRaw);
+  if (!Number.isSafeInteger(expertSims) || expertSims < 1 || expertSims > 100_000_000) {
+    throw new Error('AI_BOT_EXPERT_SIMS must be an integer from 1 to 100000000.');
+  }
+  const expertDetsRaw = env.AI_BOT_EXPERT_DETERMINIZATIONS?.trim();
+  const expertDets =
+    expertDetsRaw === undefined || expertDetsRaw === ''
+      ? 3 * perWorker
+      : Number(expertDetsRaw);
+  if (!Number.isSafeInteger(expertDets) || expertDets < 1 || expertDets > 64) {
+    throw new Error('AI_BOT_EXPERT_DETERMINIZATIONS must be an integer from 1 to 64.');
+  }
+
   return {
     nodeEnv,
     projectRoot: resolve(projectRoot),
@@ -269,7 +303,7 @@ export const createConfig = (
       20,
     ),
     aiBotEnabled: parseBoolean(env, 'AI_BOT_ENABLED', true),
-    aiBotWorkers: parseAiBotWorkers(env),
+    aiBotWorkers,
     aiBotQueueLimit: parseInteger(env, 'AI_BOT_QUEUE_LIMIT', 256, 1, 10_000),
     aiBotHardMaxMs: parseInteger(env, 'AI_BOT_HARD_MAX_MS', 80, 1, 1000),
     aiBotExpertEnabled: parseBoolean(env, 'AI_BOT_EXPERT_ENABLED', true),
@@ -278,18 +312,16 @@ export const createConfig = (
       env.AI_BOT_NEURAL_MODEL?.trim() ||
         'ai_bot/models/neural/policy-attn-v3.onnx',
     ),
-    aiBotExpertSims: parseInteger(env, 'AI_BOT_EXPERT_SIMS', 200_000, 1, 100_000_000),
-    aiBotExpertDeterminizations: parseInteger(
-      env,
-      'AI_BOT_EXPERT_DETERMINIZATIONS',
-      9,
-      1,
-      64,
-    ),
+    // 25k sims per worker: at the observed ~4.2k sims/s/worker this
+    // completes in ~6s, inside the 8s wall budget, so a finished search is
+    // a clean finish (no time-limit flag); the deadline stays as the net.
+    aiBotExpertSims: expertSims,
+    // 3 determinizations per worker (the A/B-winning per-worker shape).
+    aiBotExpertDeterminizations: expertDets,
     aiBotExpertMaxMs: parseInteger(
       env,
       'AI_BOT_EXPERT_MAX_MS',
-      5000,
+      8000,
       100,
       15000,
     ),

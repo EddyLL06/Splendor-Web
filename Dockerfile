@@ -32,9 +32,9 @@ RUN apt-get update \
 
 ENV NODE_ENV=production
 ENV GAME_SERVER_PORT=8000
-# Expert search uses 3 worker threads (one per vCPU on the Railway 3-vCPU
-# plan); the decision's determinizations are split across all of them.
-ENV AI_BOT_WORKERS=3
+# AI_BOT_WORKERS is left unset: the server auto-scales worker threads with
+# the plan's vCPUs (every core up to 8, e.g. 8 workers on the 8-vCPU plan).
+# Set AI_BOT_WORKERS explicitly only to override.
 ENV APP_DATA_DIR=/data
 ENV DATABASE_URL=file:/data/database/app.sqlite
 ENV AVATAR_STORAGE_DIR=/data/avatars

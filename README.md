@@ -216,13 +216,13 @@ See `.env.example`; it contains names and safe defaults only.
 | `VERIFICATION_CODE_RESEND_SECONDS` | `60` | Durable resend cooldown |
 | `VERIFICATION_CODE_MAX_ATTEMPTS` | `5` | Durable wrong-code limit |
 | `AI_BOT_ENABLED` | `true` | `false` disables bot seats and AI workers entirely (pure-human rollback) |
-| `AI_BOT_WORKERS` | `auto` | `auto` = 1 on 2-vCPU boxes, 2 on larger; or an integer 0–4 |
+| `AI_BOT_WORKERS` | `auto` | Production `auto`: one worker per vCPU up to 8 (one core kept free above); local/test stays 1–2; integer 0–16 overrides |
 | `AI_BOT_QUEUE_LIMIT` | `256` | Max queued AI search jobs before fallback |
 | `AI_BOT_HARD_MAX_MS` | `80` | Hard search compute budget per move |
 | `AI_BOT_EXPERT_ENABLED` | `true` | Expert difficulty uses the ds-search engine (PIMC-MCTS) |
-| `AI_BOT_EXPERT_SIMS` | `200000` | Simulation cap for one expert decision (split across workers) |
-| `AI_BOT_EXPERT_DETERMINIZATIONS` | `9` | Seeded hidden-state determinizations per expert decision |
-| `AI_BOT_EXPERT_MAX_MS` | `5000` | Expert search wall-clock budget per move |
+| `AI_BOT_EXPERT_SIMS` | `25k × workers` | Simulation budget per expert decision (adaptive: 8 workers = 200k; completes inside the 8s wall clock — a clean finish, not a timeout) |
+| `AI_BOT_EXPERT_DETERMINIZATIONS` | `3 × workers` | Seeded hidden-state determinizations per expert decision (adaptive) |
+| `AI_BOT_EXPERT_MAX_MS` | `8000` | Expert search wall-clock budget per move |
 | `AI_BOT_NEURAL_MODEL` | *(ignored)* | Legacy ONNX model path; the neural Expert agent is disabled |
 | `DS_LEAF_MODE` | `best2ply` | Leaf value mode: `static`, `bestply`, `best2ply`, `best3ply`, `oneply` |
 | `DS_EXPLORE_C` | `0.5` | PUCT exploration weight (tuned with the best2ply leaves) |
@@ -253,7 +253,7 @@ Design constraints:
   the 15-prestige race), and picks the root move with the best mean value
   across determinizations. Determinizations are split across the worker pool,
   so `AI_BOT_WORKERS=3` on a 3-vCPU Railway service uses all cores for one
-  2-player bot decision within the `AI_BOT_EXPERT_MAX_MS=5000` budget. Expert
+  2-player bot decision within the `AI_BOT_EXPERT_MAX_MS=8000` budget. Expert
   decisions start computing during the presentation "thinking" delay, so a
   move takes ~max(delay, search) instead of the sum. The legacy neural Expert
   (ONNX PUCT) is fully disabled; its files remain in the repo but are never
@@ -293,25 +293,28 @@ match ID, never full match state, hidden card IDs, tickets, or credentials.
 
 The repo ships a Railway-ready container (`Dockerfile` +
 `railway-entrypoint.sh` + nginx template). For the Expert search budget
-(5 s per move on 3 vCPU / 3 GB RAM), provision the service with **3 vCPU /
-3 GB** and set:
+(8 s per move on 8 vCPU / 8 GB RAM), provision the service with **8 vCPU /
+8 GB**. Worker count, simulation budget and determinizations auto-scale with
+the plan (8 workers · 200k sims · 24 determinizations); everything is baked
+in, and each value can still be overridden per service:
 
 ```dotenv
-AI_BOT_WORKERS=3
-AI_BOT_EXPERT_MAX_MS=5000
+AI_BOT_WORKERS=8
+AI_BOT_EXPERT_MAX_MS=8000
 AI_BOT_EXPERT_SIMS=200000
-AI_BOT_EXPERT_DETERMINIZATIONS=9
+AI_BOT_EXPERT_DETERMINIZATIONS=24
 ```
 
-With 3 workers, one 2-player expert decision splits its 9 determinizations
-across all cores and stays inside the 5 s wall-clock budget; the search runs
-during the bot's presentation delay, so each bot move takes ~5–6 s wall time.
-Memory stays well under the 3 GB limit (search trees are tiny per node and
-the neural model is never loaded). `AI_BOT_WORKERS=3` is baked into the
-runtime image (Dockerfile `ENV`); no manual Railway variable is needed —
-override per service only if you change the plan. This branch does not
-perform the actual `railway up`; deploy it from the Railway dashboard or CLI
-as usual.
+With 8 workers, one 2-player expert decision splits its 24
+determinizations across all cores and reaches the 200k-simulation budget in
+~6 s (inside the 8 s wall-clock safety net, so completed searches show no
+time-limit flag); the search runs during the bot's presentation delay, so
+each bot move takes ~6 s wall time. Memory stays within the 8 GB limit
+(~2–3 GB peak observed with 3 workers; ~8 workers scales linearly). The
+worker count auto-scales with the plan's vCPUs (Dockerfile), so no manual
+Railway variable is needed; override per service only if you want different
+tuning. This branch does not perform the actual `railway up`; deploy it from
+the Railway dashboard or CLI as usual.
 
 ## Security design
 

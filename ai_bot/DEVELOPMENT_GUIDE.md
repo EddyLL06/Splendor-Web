@@ -498,7 +498,7 @@ value(state, perspective) = Σ normalizedFeature_i × weight_i
 | Easy | 便宜评分后，从前 6–8 项按 softmax/加权随机选择 | 无 | 8ms | 128 节点 | 首发开启 |
 | Normal | 评估全部行动后选最高，seeded tie-break | 1-ply | 20ms | 256 节点 | 首发开启 |
 | Hard | 预评分保留前 5，模拟所有对手各一次贪心回应，直到 Bot 下一回合前 | 一轮小宽度 beam | 80ms | 800 节点，1 个确定化 | 性能门槛后开启 |
-| Expert | ds-search-v1：PIMC-MCTS（确定化 + PUCT 深度搜索 + 终局 rollout），无神经网络 | 每确定化一棵树，跨 worker 聚合 | 5000ms（Railway 3 vCPU） | 200k 模拟上限，9 个确定化 | 首发开启 |
+| Expert | ds-search-v1：PIMC-MCTS（确定化 + PUCT 深度搜索 + 终局 rollout），无神经网络 | 每确定化一棵树，跨 worker 聚合 | 8000ms（安全网） | 25k 模拟/worker + 3 确定化/worker（自适应；8 vCPU = 200k sims / 24 确定化，~6s 跑完） | 首发开启 |
 
 说明：
 
@@ -565,12 +565,16 @@ exploreC 0.5）对冻结基线 ds-search-v1（static 叶子 + 单确定化 + exp
 推荐默认：
 
 ```text
-logical CPUs <= 2: 1 worker
-logical CPUs >= 3: 2 workers
-配置硬上限: 4 workers
+生产 auto 规则（NODE_ENV=production）:
+  logical CPUs <= 8: 每核 1 个 worker（8 vCPU -> 8 workers）
+  logical CPUs >  8: 保留 1 核给主服务（16 vCPU -> 15 workers）
+  配置硬上限: 16 workers
+本地/测试 auto: 保持保守（<=2 核 1 个，其余 2 个）
 ```
 
-实现可使用 `os.availableParallelism()`，但必须保留至少一个核心给主服务，并允许环境变量进一步降低。不要默认开到 `CPU - 1`，因为同一进程还承担 HTTP、认证、Socket.IO、图片和 Vite/静态服务。
+依据：搜索是 CPU 密集且随 worker 数近似线性扩展；bot 思考期间主进程只在等结果、
+几乎不占 CPU，因此 ≤8 核时可用满。模拟预算与确定化数随 worker 数自适应
+（25k sims/worker、3 确定化/worker），显式环境变量始终优先。
 
 ### 10.2 队列规则
 
