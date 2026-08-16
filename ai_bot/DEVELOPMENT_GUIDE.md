@@ -498,16 +498,35 @@ value(state, perspective) = Σ normalizedFeature_i × weight_i
 | Easy | 便宜评分后，从前 6–8 项按 softmax/加权随机选择 | 无 | 8ms | 128 节点 | 首发开启 |
 | Normal | 评估全部行动后选最高，seeded tie-break | 1-ply | 20ms | 256 节点 | 首发开启 |
 | Hard | 预评分保留前 5，模拟所有对手各一次贪心回应，直到 Bot 下一回合前 | 一轮小宽度 beam | 80ms | 800 节点，1 个确定化 | 性能门槛后开启 |
-| Expert | Hard 结果接近时才对前 2–3 项做 micro-MCTS | 条件式 | 120ms | 150 次模拟，最多 4 个确定化 | 默认关闭 |
+| Expert | ds-search-v1：PIMC-MCTS（确定化 + PUCT 深度搜索 + 终局 rollout），无神经网络 | 每确定化一棵树，跨 worker 聚合 | 5000ms（Railway 3 vCPU） | 200k 模拟上限，9 个确定化 | 首发开启 |
 
 说明：
 
 - “硬预算”是 worker 内主动检查的 deadline，不是平均目标。
 - 每扩展固定数量节点都检查 deadline；到期立即返回 best-so-far。
 - coordinator 另设外部 watchdog，例如预算 + 50ms（至少 2s，为 worker 冷启动留出余量）。worker 无响应时终止/重建该 worker，并使用 Normal 或 Easy 回退。
-- 人类观感延迟建议 350–650ms，使用 seeded 抖动；它不计入 AI CPU 预算，也不占 worker。
+- 人类观感延迟建议 350–650ms，使用 seeded 抖动；它不计入 AI CPU 预算，也不占 worker。Expert 的搜索在观感延迟期间并行计算，总延迟 ≈ max(延迟, 搜索)。
 - 若候选很少或能立即结束游戏，允许提前返回。
 - Expert 必须用功能开关；没有显著胜率收益时不值得生产成本。
+
+### 9.2 Expert（ds-search-v1）算法摘要
+
+Expert 难度只使用纯搜索 + 对局模拟（`src/shared/ai/search/ds-search.ts`），不使用
+任何神经网络；`ai_bot/neural` 与 ONNX 模型文件保留在仓库中但运行时完全停用。
+
+1. **确定化（PIMC）**：隐藏信息只有牌堆顺序和对手暗牌预留。对每个确定化用
+   seeded RNG 重建完整合法状态；同一 (observation, seed) 恒得到同一批确定化。
+2. **MCTS + PUCT**：树中双方都按自己视角最大化（对手节点翻转 Q 符号），prior 来自
+   无 apply 的快速动作质量评分；叶子值 = tanh(调优线性评估 / 40)，终局 ±1。
+3. **终局竞速 rollout**：任一方 ≥ 12 分（或树深 ≥ 24）时，叶子用快速贪心
+   rollout 模拟到终局，直接推演“谁先到 15”。
+4. **聚合**：所有确定化（以及所有 worker 线程）的根动作 (visits, valueSum)
+   求和，按平均价值 → 访问数 → actionKey 排序选出着法；结果对同 seed 确定。
+
+预算由 `AI_BOT_EXPERT_MAX_MS`（墙钟）、`AI_BOT_EXPERT_SIMS`（模拟上限）与
+`AI_BOT_EXPERT_DETERMINIZATIONS`（确定化数）控制；确定化按 worker 数切片并行。
+`predictChildPlayer` 用无克隆的规则镜像预测子节点玩家，与权威模拟的差分测试
+（`tests/ai/ds-search.test.ts`）保证树视角正确。
 
 ### 9.1 Hard 的“一轮”定义
 

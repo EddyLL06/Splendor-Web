@@ -219,11 +219,11 @@ See `.env.example`; it contains names and safe defaults only.
 | `AI_BOT_WORKERS` | `auto` | `auto` = 1 on 2-vCPU boxes, 2 on larger; or an integer 0–4 |
 | `AI_BOT_QUEUE_LIMIT` | `256` | Max queued AI search jobs before fallback |
 | `AI_BOT_HARD_MAX_MS` | `80` | Hard search compute budget per move |
-| `AI_BOT_EXPERT_ENABLED` | `true` | Expert difficulty uses the bundled neural PUCT agent |
-| `AI_BOT_NEURAL_MODEL` | `ai_bot/models/neural/policy-attn-v3.onnx` | ONNX policy-value model loaded per worker |
-| `AI_BOT_EXPERT_SIMS` | `96` | PUCT simulations per determinization |
-| `AI_BOT_EXPERT_DETERMINIZATIONS` | `2` | Seeded hidden-state determinizations |
-| `AI_BOT_EXPERT_MAX_MS` | `3000` | Expert search wall-clock budget per move |
+| `AI_BOT_EXPERT_ENABLED` | `true` | Expert difficulty uses the ds-search engine (PIMC-MCTS) |
+| `AI_BOT_EXPERT_SIMS` | `200000` | Simulation cap for one expert decision (split across workers) |
+| `AI_BOT_EXPERT_DETERMINIZATIONS` | `9` | Seeded hidden-state determinizations per expert decision |
+| `AI_BOT_EXPERT_MAX_MS` | `5000` | Expert search wall-clock budget per move |
+| `AI_BOT_NEURAL_MODEL` | *(ignored)* | Legacy ONNX model path; the neural Expert agent is disabled |
 
 Non-test secrets must contain at least 256 bits of random material. Rotate a
 secret deliberately: changing the session or game credential key invalidates
@@ -243,21 +243,23 @@ Design constraints:
   opponents' blind reservation card IDs are never visible to a bot.
 - Each decision is bounded by CPU time, node count, and queue depth; timeouts
   and overload degrade to the cheap Normal policy so a game never stalls.
-- On a 2-vCPU / 2 GB RAM server keep `AI_BOT_WORKERS=1` (the `auto` default
-  already picks 1 there) and `AI_BOT_EXPERT_MAX_MS=3000` (the default).
-  Expert runs an ONNX policy-value network (`policy-attn-v3.onnx`) with a
-  bounded PUCT search in the shared worker pool; if the model file is missing
-  or inference fails, it falls back to the heuristic Expert search and then
-  to the Normal policy, so games never stall.
-- The model is a single versioned JSON file:
+- **Expert = ds-search-v1 (pure search + simulation, no neural networks).**
+  Each decision determinizes the hidden deck several times, runs a PUCT MCTS
+  tree over both players' moves in every determinization, extends leaves with
+  fast greedy rollouts once the game nears the 15-prestige race, and picks the
+  root move with the best mean value across determinizations. Determinizations
+  are split across the worker pool, so `AI_BOT_WORKERS=3` on a 3-vCPU Railway
+  service uses all cores for one 2-player bot decision within the
+  `AI_BOT_EXPERT_MAX_MS=5000` budget. Expert decisions start computing during
+  the presentation "thinking" delay, so a move takes ~max(delay, search)
+  instead of the sum. The legacy neural Expert (ONNX PUCT) is fully disabled;
+  its files remain in the repo but are never loaded at runtime.
+- The heuristic model is a single versioned JSON file:
   `ai_bot/models/heuristic-v1.json`. At startup the server verifies its rules
   fingerprint against the deployed rule sources and logs a warning on
   mismatch; a missing/corrupt model falls back to built-in hand-tuned weights
-  without breaking human play.
-- The neural Expert model lives in `ai_bot/models/neural/policy-attn-v3.onnx`
-  with a manifest (`policy-attn-v3.json`) recording encoder dims, SHA-256 and
-  training data. It is loaded once per worker thread at first Expert move.
-  Training remains fully offline; production only runs inference.
+  without breaking human play. These weights seed the search's leaf
+  evaluation and priors.
 
 Rollback options (no database migration involved):
 
@@ -271,6 +273,27 @@ Observability: authenticated clients can read aggregate AI metrics at
 fallbacks, no-legal/stale counters, peak queue depth, worker restarts, model
 version and fingerprint status). Logs only ever contain a short hash of a
 match ID, never full match state, hidden card IDs, tickets, or credentials.
+
+## Railway deployment (prepared)
+
+The repo ships a Railway-ready container (`Dockerfile` +
+`railway-entrypoint.sh` + nginx template). For the Expert search budget
+(5 s per move on 3 vCPU / 3 GB RAM), provision the service with **3 vCPU /
+3 GB** and set:
+
+```dotenv
+AI_BOT_WORKERS=3
+AI_BOT_EXPERT_MAX_MS=5000
+AI_BOT_EXPERT_SIMS=200000
+AI_BOT_EXPERT_DETERMINIZATIONS=9
+```
+
+With 3 workers, one 2-player expert decision splits its 9 determinizations
+across all cores and stays inside the 5 s wall-clock budget; the search runs
+during the bot's presentation delay, so each bot move takes ~5–6 s wall time.
+Memory stays well under the 3 GB limit (search trees are tiny per node and
+the neural model is never loaded). This branch does not perform the actual
+`railway up`; deploy it from the Railway dashboard or CLI as usual.
 
 ## Security design
 

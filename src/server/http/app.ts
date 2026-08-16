@@ -217,10 +217,9 @@ export const createGemCouncilApplication = async (
     entry: workerEntryFor(),
     queueLimit: config.aiBotQueueLimit,
     hardMaxMs: config.aiBotHardMaxMs,
+    expertMaxMs: config.aiBotExpertMaxMs,
     metrics: aiMetrics,
     workerData: {
-      expertEnabled: config.aiBotExpertEnabled,
-      neuralModelPath: config.aiBotNeuralModel,
       expertSims: config.aiBotExpertSims,
       expertDeterminizations: config.aiBotExpertDeterminizations,
       expertMaxMs: config.aiBotExpertMaxMs,
@@ -228,11 +227,8 @@ export const createGemCouncilApplication = async (
   });
   botCoordinator.setPool(aiPool);
   if (config.aiBotExpertEnabled) {
-    const neuralPresent = existsSync(config.aiBotNeuralModel);
     console.log(
-      `[ai] neural expert model: ${neuralPresent ? 'present' : 'MISSING'} (${
-        config.aiBotNeuralModel
-      }${neuralPresent ? '' : '; expert falls back to heuristic search'})`,
+      `[ai] expert search: ds-search-v1 (PIMC-MCTS, ${config.aiBotExpertDeterminizations} determinizations, ${config.aiBotExpertMaxMs}ms budget, ${config.aiBotWorkers} workers); neural model disabled`,
     );
   }
   rooms.setDeletionHandler((matchID) => {
@@ -488,8 +484,8 @@ export const createGemCouncilApplication = async (
         workerCount: config.aiBotWorkers,
         workersActive: aiPool.workersActive,
         expertEnabled: config.aiBotExpertEnabled,
-        expertModel: {
-          path: config.aiBotNeuralModel,
+        expertSearch: {
+          policy: 'ds-search-v1',
           sims: config.aiBotExpertSims,
           determinizations: config.aiBotExpertDeterminizations,
           maxMs: config.aiBotExpertMaxMs,

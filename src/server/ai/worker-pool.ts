@@ -10,20 +10,40 @@ import { Worker } from 'node:worker_threads';
 
 import type { HardDecisionInput } from '../../shared/ai/search/beam.js';
 import { computeHardDecision } from '../../shared/ai/search/beam.js';
-import { computeExpertDecision } from '../../shared/ai/search/micro-mcts.js';
+import {
+  computeDsSearchDecision,
+  type DsSearchResult,
+} from '../../shared/ai/search/ds-search.js';
 import type { BotDecision } from '../../shared/ai/types.js';
 import type { ExpertMemorySnapshot } from '../../shared/ai/memory.js';
 import type { AiMetrics } from './metrics.js';
 
 interface QueuedJob {
   id: number;
-  input: HardDecisionInput;
+  input: HardDecisionInput | ExpertPoolInput;
   mode: 'hard' | 'expert';
   priority: 'live' | 'background';
-  resolve: (decision: BotDecision) => void;
+  resolve: (result: unknown) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
   worker?: Worker;
+}
+
+/** Expert search input accepted by the pool (budget fields optional). */
+export interface ExpertPoolInput {
+  observation: HardDecisionInput['observation'];
+  ctx: HardDecisionInput['ctx'];
+  seed: string;
+  weights: Record<string, number>;
+  memory?: ExpertMemorySnapshot;
+  budget?: {
+    deadlineEpochMs: number;
+    maxSimulations?: number;
+    maxDeterminizations?: number;
+    determinizations?: number;
+    detIndex?: number;
+    detCount?: number;
+  };
 }
 
 export interface WorkerPoolMetrics {
@@ -50,6 +70,7 @@ export class AiWorkerPool {
       entry: string;
       queueLimit: number;
       hardMaxMs: number;
+      expertMaxMs?: number;
       metrics?: AiMetrics;
       workerData?: Record<string, unknown>;
     },
@@ -72,42 +93,126 @@ export class AiWorkerPool {
     input: HardDecisionInput,
     priority: 'live' | 'background' = 'live',
   ): Promise<BotDecision> {
-    return this.request(input, 'hard', priority);
+    return (await this.request(input, 'hard', priority)) as BotDecision;
   }
 
+  /**
+   * Expert decision via the ds-search engine. The determinizations are split
+   * across idle workers (one slice per worker, up to the worker cap) and the
+   * per-action root statistics are merged, so a 3-vCPU deployment uses all
+   * cores for a single 2-player bot decision.
+   */
   async requestExpertDecision(
-    input: HardDecisionInput & { memory?: ExpertMemorySnapshot },
+    input: ExpertPoolInput,
     priority: 'live' | 'background' = 'live',
   ): Promise<BotDecision> {
-    return this.request(input, 'expert', priority);
+    if (this.disposed) throw new Error('AiWorkerPool is disposed.');
+    const budget = input.budget;
+    const detTotal = Math.max(
+      1,
+      budget?.determinizations ?? budget?.maxDeterminizations ?? 9,
+    );
+    const simCap = Math.max(1, budget?.maxSimulations ?? 200_000);
+    const deadline =
+      budget?.deadlineEpochMs ??
+      performance.now() + (this.options.expertMaxMs ?? 5000);
+
+    if (this.options.workerCount === 0) {
+      const result = computeDsSearchDecision({
+        observation: input.observation,
+        ctx: input.ctx,
+        seed: input.seed,
+        weights: input.weights,
+        budget: {
+          deadlineEpochMs: deadline,
+          maxSimulations: simCap,
+          determinizations: detTotal,
+          detIndex: 0,
+          detCount: detTotal,
+        },
+        memory: input.memory,
+      });
+      return result.decision;
+    }
+
+    const sliceCount = Math.min(this.options.workerCount, detTotal);
+    const perSliceSims = Math.ceil(simCap / sliceCount);
+    const tasks: Promise<DsSearchResult>[] = [];
+    let assigned = 0;
+    for (let index = 0; index < sliceCount; index += 1) {
+      const detCount =
+        Math.floor(detTotal / sliceCount) +
+        (index < detTotal % sliceCount ? 1 : 0);
+      if (detCount <= 0) continue;
+      const detIndex = assigned;
+      assigned += detCount;
+      const sliceInput: ExpertPoolInput = {
+        observation: input.observation,
+        ctx: input.ctx,
+        seed: input.seed,
+        weights: input.weights,
+        memory: input.memory,
+        budget: {
+          deadlineEpochMs: deadline,
+          maxSimulations: perSliceSims,
+          determinizations: detTotal,
+          detIndex,
+          detCount,
+        },
+      };
+      tasks.push(
+        this.request(sliceInput, 'expert', priority) as Promise<DsSearchResult>,
+      );
+    }
+
+    const settled = await Promise.allSettled(tasks);
+    const results = settled
+      .filter(
+        (entry): entry is PromiseFulfilledResult<DsSearchResult> =>
+          entry.status === 'fulfilled',
+      )
+      .map((entry) => entry.value);
+    if (results.length === 0) {
+      const firstRejection = settled.find(
+        (entry): entry is PromiseRejectedResult =>
+          entry.status === 'rejected',
+      );
+      throw (firstRejection?.reason as Error) ??
+        new Error('AI_BOT_WORKER_EMPTY_RESPONSE');
+    }
+    return mergeDsSearchResults(results, input.seed);
   }
 
   /**
    * The search budget only bounds compute inside the worker; worker-thread
    * startup (module/tsx loading) and IPC round-trips add time on top,
    * especially on cold CI/containers. Keep a minimum grace so the watchdog
-   * never races ahead of a cold worker boot.
+   * never races ahead of a cold worker boot or a full-length expert search.
    */
   private watchdogMs(): number {
-    return Math.max(this.options.hardMaxMs + 50, 2_000);
+    return Math.max(
+      this.options.hardMaxMs + 50,
+      (this.options.expertMaxMs ?? 5_000) + 1_000,
+      2_000,
+    );
   }
 
   private async request(
-    input: HardDecisionInput,
+    input: HardDecisionInput | ExpertPoolInput,
     mode: 'hard' | 'expert',
     priority: 'live' | 'background',
-  ): Promise<BotDecision> {
+  ): Promise<unknown> {
     if (this.disposed) throw new Error('AiWorkerPool is disposed.');
     if (this.options.workerCount === 0) {
-      return mode === 'hard'
-        ? computeHardDecision(input)
-        : computeExpertDecision(input);
+      // Expert mode with 0 workers is handled in requestExpertDecision
+      // (inline ds-search); this path only serves hard requests in tests.
+      return computeHardDecision(input as HardDecisionInput);
     }
     if (this.queue.length + this.pending.size >= this.options.queueLimit) {
       throw new Error('AI_BOT_QUEUE_FULL');
     }
     const id = this.nextID++;
-    return new Promise<BotDecision>((resolve, reject) => {
+    return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         this.timedOutJobs += 1;
@@ -243,4 +348,57 @@ export class AiWorkerPool {
 export const workerEntryFor = (): string => {
   const base = import.meta.url.endsWith('.ts') ? 'worker.ts' : 'worker.js';
   return fileURLToPath(new URL(base, import.meta.url));
+};
+
+/**
+ * Merge per-worker ds-search slices: sum root action statistics (mean value
+ * dominates, then visits, then actionKey for determinism) and pick the move
+ * from any slice's movesByKey.
+ */
+export const mergeDsSearchResults = (
+  results: DsSearchResult[],
+  seed: string,
+): BotDecision => {
+  const agg = new Map<string, { visits: number; valueSum: number }>();
+  const movesByKey: Record<string, BotDecision['move']> = {};
+  let nodesVisited = 0;
+  let elapsedMs = 0;
+  let timedOut = false;
+  for (const result of results) {
+    Object.assign(movesByKey, result.movesByKey);
+    nodesVisited += result.decision.nodesVisited;
+    elapsedMs = Math.max(elapsedMs, result.decision.elapsedMs);
+    timedOut = timedOut || result.decision.timedOut;
+    for (const stat of result.stats) {
+      const entry = agg.get(stat.actionKey);
+      if (entry) {
+        entry.visits += stat.visits;
+        entry.valueSum += stat.valueSum;
+      } else {
+        agg.set(stat.actionKey, { visits: stat.visits, valueSum: stat.valueSum });
+      }
+    }
+  }
+  const ranked = [...agg.entries()].sort((left, right) => {
+    const leftMean = left[1].valueSum / Math.max(1, left[1].visits);
+    const rightMean = right[1].valueSum / Math.max(1, right[1].visits);
+    return (
+      rightMean - leftMean ||
+      right[1].visits - left[1].visits ||
+      left[0].localeCompare(right[0])
+    );
+  });
+  const bestKey = ranked[0]?.[0];
+  const move =
+    (bestKey ? movesByKey[bestKey] : undefined) ?? results[0].decision.move;
+  return {
+    move,
+    modelVersion: 'ai-kernel-ds-v1.0.0',
+    policy: 'ds-search-v1',
+    seed,
+    nodesVisited,
+    elapsedMs: Math.round(elapsedMs * 100) / 100,
+    timedOut,
+    fallbackLevel: timedOut ? 1 : 0,
+  };
 };

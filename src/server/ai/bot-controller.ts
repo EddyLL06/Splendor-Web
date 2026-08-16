@@ -21,7 +21,7 @@ import {
   chooseBotMove,
 } from '../../shared/ai/policy.js';
 import { computeHardDecision } from '../../shared/ai/search/beam.js';
-import { computeExpertDecision } from '../../shared/ai/search/micro-mcts.js';
+import { computeDsSearchDecision } from '../../shared/ai/search/ds-search.js';
 import { createObservation } from '../../shared/ai/observation.js';
 import {
   seedMemoryFromObservation,
@@ -67,6 +67,8 @@ export interface BotControllerOptions {
   hardMaxMs: number;
   expertEnabled: boolean;
   expertMaxMs: number;
+  expertSims: number;
+  expertDeterminizations: number;
   metrics?: AiMetrics;
 }
 
@@ -78,6 +80,11 @@ export class BotController {
   private thinking = false;
   private timer?: ReturnType<typeof setTimeout>;
   private memory?: ExpertMemorySnapshot;
+  private pendingDecision?: {
+    generation: number;
+    stateID: number;
+    promise: Promise<BotDecision>;
+  };
 
   constructor(private readonly options: BotControllerOptions) {}
 
@@ -141,12 +148,43 @@ export class BotController {
     const max = this.options.thinkDelayMaxMs ?? DEFAULT_THINK_DELAY_MAX_MS;
     const delay = min + jitter.next() * (max - min);
     if (this.timer) clearTimeout(this.timer);
+    // Expert search runs in parallel with the presentation delay so the
+    // total wall time per move is ~max(delay, search) instead of the sum.
+    if (this.options.difficulty === 'expert') {
+      this.pendingDecision = {
+        generation,
+        stateID,
+        promise: this.computeDecisionForState(state, generation, stateID),
+      };
+    }
     this.timer = setTimeout(() => {
       this.timer = undefined;
       if (this.stopped || generation !== this.generation) return;
       if (this.lastStateID !== stateID) return;
       void this.thinkAndSubmit(state, generation, stateID);
     }, delay);
+  }
+
+  private computeDecisionForState(
+    state: NonNullable<ReturnType<GameClient['getState']>>,
+    generation: number,
+    stateID: number,
+  ): Promise<BotDecision> {
+    const playerID = this.options.playerID;
+    const ctx: BoardContextView = {
+      currentPlayer: playerID,
+      playOrder: state.ctx.playOrder,
+      playOrderPos: state.ctx.playOrderPos,
+    };
+    const observation = createObservation(
+      state.G as SplendorState,
+      playerID,
+      ctx,
+    );
+    const seed = `${this.options.matchID}:${playerID}:${stateID}`;
+    void generation;
+    void stateID;
+    return this.computeDecision(observation, ctx, seed);
   }
 
   private async thinkAndSubmit(
@@ -170,7 +208,13 @@ export class BotController {
         ctx,
       );
       const seed = `${this.options.matchID}:${playerID}:${stateID}`;
-      const decision = await this.computeDecision(observation, ctx, seed);
+      const pending = this.pendingDecision;
+      const decision =
+        pending &&
+        pending.generation === generation &&
+        pending.stateID === stateID
+          ? await pending.promise
+          : await this.computeDecision(observation, ctx, seed);
       if (this.stopped || generation !== this.generation) {
         this.options.metrics?.recordStaleResult();
         return;
@@ -193,6 +237,7 @@ export class BotController {
       this.options.onError?.(caught);
     } finally {
       this.thinking = false;
+      this.pendingDecision = undefined;
     }
   }
 
@@ -213,15 +258,23 @@ export class BotController {
     }
     const expertMode =
       this.options.difficulty === 'expert' && this.options.expertEnabled;
-    const budget = {
-      deadlineEpochMs:
-        performance.now() +
-        (expertMode ? this.options.expertMaxMs : this.options.hardMaxMs),
-      maxNodes: expertMode ? 1600 : 800,
-      beamWidth: 5,
-      maxDeterminizations: 1,
-      maxSimulations: 0,
-    };
+    const budget = expertMode
+      ? {
+          deadlineEpochMs:
+            performance.now() + this.options.expertMaxMs,
+          maxNodes: 0,
+          beamWidth: 0,
+          maxDeterminizations: this.options.expertDeterminizations,
+          maxSimulations: this.options.expertSims,
+        }
+      : {
+          deadlineEpochMs:
+            performance.now() + this.options.hardMaxMs,
+          maxNodes: 800,
+          beamWidth: 5,
+          maxDeterminizations: 1,
+          maxSimulations: 0,
+        };
     try {
       if (this.options.pool) {
         const input = {
@@ -250,7 +303,16 @@ export class BotController {
         memory: this.memory,
       };
       const decision = expertMode
-        ? computeExpertDecision(input)
+        ? (computeDsSearchDecision({
+            ...input,
+            budget: {
+              deadlineEpochMs: budget.deadlineEpochMs,
+              maxSimulations: budget.maxSimulations,
+              determinizations: budget.maxDeterminizations,
+              detIndex: 0,
+              detCount: budget.maxDeterminizations,
+            },
+          }).decision)
         : computeHardDecision(input);
       this.options.metrics?.recordDecision(
         decision.elapsedMs,

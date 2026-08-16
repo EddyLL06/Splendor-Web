@@ -98,6 +98,10 @@ const main = async (): Promise<void> => {
     results.push(
       runGame(index, numPlayers, agentOrder, seed, maxActions, {
         'normal-v1': weights,
+        'ds-search-v1': weights,
+      }, {
+        'ds-search-v1': Number(values.get('ds-budget') ?? '1000'),
+        'expert-v1': Number(values.get('expert-budget') ?? '180'),
       }),
     );
     if ((index + 1) % progressEvery === 0) {

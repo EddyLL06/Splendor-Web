@@ -69,6 +69,9 @@ export class BotCoordinator {
         hardMaxMs: this.dependencies.config.aiBotHardMaxMs,
         expertEnabled: this.dependencies.config.aiBotExpertEnabled,
         expertMaxMs: this.dependencies.config.aiBotExpertMaxMs,
+        expertSims: this.dependencies.config.aiBotExpertSims,
+        expertDeterminizations:
+          this.dependencies.config.aiBotExpertDeterminizations,
         metrics: this.dependencies.metrics,
         onError: (error) => {
           console.error(

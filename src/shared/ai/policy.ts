@@ -13,6 +13,8 @@ import { scoreCandidate } from './evaluate.js';
 import { evaluateWithWeights } from './evaluate.js';
 import { computeHardDecision } from './search/beam.js';
 import { computeExpertDecision } from './search/micro-mcts.js';
+import { computeDsSearchDecision } from './search/ds-search.js';
+import { HAND_TUNED_WEIGHTS } from './models/default.js';
 import { chooseNormalMove } from './policy-normal.js';
 import {
   IllegalCandidateError,
@@ -152,6 +154,29 @@ export const chooseBotMove = (
     });
     validateMove(fullState, observation.playerID, ctx, decision);
     return decision;
+  }
+  if (options.policy === 'ds-search-v1') {
+    const budgetMs = options.budgetMs ?? 5_000;
+    const determinizations = 6;
+    const result = computeDsSearchDecision({
+      observation,
+      ctx,
+      seed: options.seed,
+      weights:
+        options.weights && Object.keys(options.weights).length > 0
+          ? options.weights
+          : { ...HAND_TUNED_WEIGHTS },
+      budget: {
+        deadlineEpochMs: performance.now() + budgetMs,
+        maxSimulations: 4_000_000,
+        determinizations,
+        detIndex: 0,
+        detCount: determinizations,
+      },
+      memory: options.memory,
+    });
+    validateMove(fullState, observation.playerID, ctx, result.decision);
+    return result.decision;
   }
   const candidates = enumerateLegalActions(
     fullState,
