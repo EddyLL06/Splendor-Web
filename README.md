@@ -216,7 +216,7 @@ See `.env.example`; it contains names and safe defaults only.
 | `VERIFICATION_CODE_RESEND_SECONDS` | `60` | Durable resend cooldown |
 | `VERIFICATION_CODE_MAX_ATTEMPTS` | `5` | Durable wrong-code limit |
 | `AI_BOT_ENABLED` | `true` | `false` disables bot seats and AI workers entirely (pure-human rollback) |
-| `AI_BOT_WORKERS` | `auto` | Production `auto`: one worker per vCPU up to 8 (one core kept free above); local/test stays 1–2; integer 0–16 overrides |
+| `AI_BOT_WORKERS` | `auto` | One worker per vCPU up to 8 (one core kept free above), independent of NODE_ENV; integer 0–16 overrides |
 | `AI_BOT_QUEUE_LIMIT` | `256` | Max queued AI search jobs before fallback |
 | `AI_BOT_HARD_MAX_MS` | `80` | Hard search compute budget per move |
 | `AI_BOT_EXPERT_ENABLED` | `true` | Expert difficulty uses the ds-search engine (PIMC-MCTS) |

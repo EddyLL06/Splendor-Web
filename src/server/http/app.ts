@@ -3,6 +3,7 @@ import type { Server as HttpServer } from 'node:http';
 import { unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { availableParallelism } from 'node:os';
 
 import type Koa from 'koa';
 import { koaBody, type ScalarOrArrayFiles } from 'koa-body';
@@ -235,7 +236,7 @@ export const createGemCouncilApplication = async (
   botCoordinator.setPool(aiPool);
   if (config.aiBotExpertEnabled) {
     console.log(
-      `[ai] expert search: ds-search-v1 (PIMC-MCTS, ${config.aiBotExpertDeterminizations} determinizations, ${config.aiBotExpertMaxMs}ms budget, ${config.aiBotWorkers} workers); neural model disabled`,
+      `[ai] expert search: ds-search-v1 (PIMC-MCTS, ${config.aiBotExpertDeterminizations} determinizations, ${config.aiBotExpertMaxMs}ms budget, ${config.aiBotWorkers} workers on ${availableParallelism()} logical CPUs, NODE_ENV=${config.nodeEnv}, AI_BOT_WORKERS='${process.env.AI_BOT_WORKERS?.trim() || 'auto'}'); neural model disabled`,
     );
   }
   rooms.setDeletionHandler((matchID) => {
