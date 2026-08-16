@@ -1148,7 +1148,8 @@ export const computeDsSearchDecision = (
         for (let round = 0; round < rounds; round += 1) {
           const remaining = maxSimulations - totalSims;
           if (remaining <= 0) {
-            timedOut = true;
+            // The planned simulation budget completed: a successful search,
+            // NOT a timeout (only the wall-clock deadline flags timedOut).
             break outer;
           }
           const before = tree.sims;
@@ -1167,7 +1168,7 @@ export const computeDsSearchDecision = (
     for (const tree of trees) {
       const remaining = maxSimulations - totalSims;
       if (remaining <= 0) {
-        timedOut = true;
+        // Simulation budget completed: success, not a timeout.
         break;
       }
       const before = tree.sims;

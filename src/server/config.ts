@@ -278,7 +278,16 @@ export const createConfig = (
       env.AI_BOT_NEURAL_MODEL?.trim() ||
         'ai_bot/models/neural/policy-attn-v3.onnx',
     ),
-    aiBotExpertSims: parseInteger(env, 'AI_BOT_EXPERT_SIMS', 200_000, 1, 100_000_000),
+    aiBotExpertSims: parseInteger(
+      env,
+      'AI_BOT_EXPERT_SIMS',
+      // Sized so 3 workers complete the whole planned simulation within the
+      // 5s wall budget (~4.7s at observed throughput), so completed searches
+      // report no timeout; the wall-clock deadline remains the safety net.
+      60_000,
+      1,
+      100_000_000,
+    ),
     aiBotExpertDeterminizations: parseInteger(
       env,
       'AI_BOT_EXPERT_DETERMINIZATIONS',

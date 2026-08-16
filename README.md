@@ -220,7 +220,7 @@ See `.env.example`; it contains names and safe defaults only.
 | `AI_BOT_QUEUE_LIMIT` | `256` | Max queued AI search jobs before fallback |
 | `AI_BOT_HARD_MAX_MS` | `80` | Hard search compute budget per move |
 | `AI_BOT_EXPERT_ENABLED` | `true` | Expert difficulty uses the ds-search engine (PIMC-MCTS) |
-| `AI_BOT_EXPERT_SIMS` | `200000` | Simulation cap for one expert decision (split across workers) |
+| `AI_BOT_EXPERT_SIMS` | `60000` | Simulation budget for one expert decision (split across workers; sized to finish inside the 5s wall clock — completing it is a clean finish, not a timeout) |
 | `AI_BOT_EXPERT_DETERMINIZATIONS` | `9` | Seeded hidden-state determinizations per expert decision |
 | `AI_BOT_EXPERT_MAX_MS` | `5000` | Expert search wall-clock budget per move |
 | `AI_BOT_NEURAL_MODEL` | *(ignored)* | Legacy ONNX model path; the neural Expert agent is disabled |
@@ -299,7 +299,7 @@ The repo ships a Railway-ready container (`Dockerfile` +
 ```dotenv
 AI_BOT_WORKERS=3
 AI_BOT_EXPERT_MAX_MS=5000
-AI_BOT_EXPERT_SIMS=200000
+AI_BOT_EXPERT_SIMS=60000
 AI_BOT_EXPERT_DETERMINIZATIONS=9
 ```
 

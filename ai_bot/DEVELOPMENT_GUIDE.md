@@ -498,7 +498,7 @@ value(state, perspective) = Σ normalizedFeature_i × weight_i
 | Easy | 便宜评分后，从前 6–8 项按 softmax/加权随机选择 | 无 | 8ms | 128 节点 | 首发开启 |
 | Normal | 评估全部行动后选最高，seeded tie-break | 1-ply | 20ms | 256 节点 | 首发开启 |
 | Hard | 预评分保留前 5，模拟所有对手各一次贪心回应，直到 Bot 下一回合前 | 一轮小宽度 beam | 80ms | 800 节点，1 个确定化 | 性能门槛后开启 |
-| Expert | ds-search-v1：PIMC-MCTS（确定化 + PUCT 深度搜索 + 终局 rollout），无神经网络 | 每确定化一棵树，跨 worker 聚合 | 5000ms（Railway 3 vCPU） | 200k 模拟上限，9 个确定化 | 首发开启 |
+| Expert | ds-search-v1：PIMC-MCTS（确定化 + PUCT 深度搜索 + 终局 rollout），无神经网络 | 每确定化一棵树，跨 worker 聚合 | 5000ms（Railway 3 vCPU） | 60k 模拟预算（3 worker 可在墙钟内跑完），9 个确定化 | 首发开启 |
 
 说明：
 
