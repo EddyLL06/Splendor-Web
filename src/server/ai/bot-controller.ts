@@ -39,6 +39,7 @@ import type { SplendorState } from '../../shared/types/game.js';
 import type { AiWorkerPool } from './worker-pool.js';
 import type { AiMetrics } from './metrics.js';
 import type { BotTraceStore } from './bot-trace.js';
+import { shortHash } from './sanitize.js';
 
 type GameClient = ReturnType<typeof Client<SplendorState>>;
 
@@ -120,7 +121,10 @@ export class BotController {
 
   private onState(state: ReturnType<GameClient['getState']>): void {
     if (this.stopped || !state || !state.isConnected) return;
-    if (state._stateID < this.lastStateID) return;
+    // Skip stale AND duplicate deliveries: socket reconnects/resyncs can
+    // re-send the same state, and restarting the (uncancellable) worker
+    // search per duplicate floods the pool queue (watchdog timeouts).
+    if (state._stateID <= this.lastStateID) return;
     this.lastStateID = state._stateID;
 
     const G = state.G as SplendorState;
@@ -346,6 +350,15 @@ export class BotController {
       ) {
         this.options.metrics?.recordTimeout();
       }
+      // The search failure must be visible in the logs (it is otherwise
+      // silent): this is the only place an Expert decision degrades.
+      console.error(
+        `[bot-controller] expert search failed for match=${shortHash(
+          this.options.matchID,
+        )} seat=${this.options.playerID}: ${
+          caught instanceof Error ? caught.message : String(caught)
+        } — falling back to normal-v1`,
+      );
       this.options.metrics?.recordFallback('search');
       const fallback = chooseBotMove(observation, ctx, {
         policy: 'normal-v1',

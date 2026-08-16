@@ -185,14 +185,15 @@ export class AiWorkerPool {
 
   /**
    * The search budget only bounds compute inside the worker; worker-thread
-   * startup (module/tsx loading) and IPC round-trips add time on top,
-   * especially on cold CI/containers. Keep a minimum grace so the watchdog
-   * never races ahead of a cold worker boot or a full-length expert search.
+   * startup (module/tsx loading), queue wait and IPC round-trips add time
+   * on top, especially on cold containers. The worker re-bases its deadline
+   * to a fresh full window when it starts, so the watchdog must cover
+   * queue wait + full search + overshoot.
    */
   private watchdogMs(): number {
     return Math.max(
       this.options.hardMaxMs + 50,
-      (this.options.expertMaxMs ?? 5_000) + 1_000,
+      (this.options.expertMaxMs ?? 5_000) + 2_500,
       2_000,
     );
   }
@@ -300,12 +301,20 @@ export class AiWorkerPool {
     worker.on('error', (error) => {
       this.restarts += 1;
       this.options.metrics?.recordWorkerRestart();
+      console.error(
+        `[ai-pool] worker error (restart #${this.restarts}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
       this.dropWorker(worker);
     });
     worker.on('exit', (code) => {
       if (code !== 0 && !this.disposed) {
         this.restarts += 1;
         this.options.metrics?.recordWorkerRestart();
+        console.error(
+          `[ai-pool] worker exited with code ${code} (restart #${this.restarts})`,
+        );
       }
       this.dropWorker(worker);
     });
