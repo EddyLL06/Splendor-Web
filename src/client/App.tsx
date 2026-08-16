@@ -23,6 +23,7 @@ import {
 import { AuthScreen } from './screens/AuthScreen.js';
 import { LobbyScreen } from './screens/LobbyScreen.js';
 import { WaitingRoom } from './screens/WaitingRoom.js';
+import BotInsightScreen from './screens/BotInsightScreen.js';
 import type { BotDifficulty } from '../shared/ai/types.js';
 
 function GameLoading() {
@@ -428,6 +429,11 @@ export default function App() {
 
   if (loading || restoring) return <GameLoading />;
   if (!user) return <AuthScreen />;
+
+  // /bot/?match=<room code> — read-only Expert bot thinking viewer.
+  if (window.location.pathname.startsWith('/bot')) {
+    return <BotInsightScreen />;
+  }
 
   if (!session) {
     return (

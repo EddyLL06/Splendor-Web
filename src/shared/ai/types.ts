@@ -22,6 +22,7 @@ export const AI_AGENTS = [
   'hard-v1',
   'expert-v1',
   'ds-search-v1',
+  'ds-search-v2',
 ] as const;
 export type AgentPolicyID = (typeof AI_AGENTS)[number];
 
@@ -46,6 +47,19 @@ export interface SearchBudget {
   detCount?: number;
 }
 
+export interface BotSearchTraceAction {
+  actionKey: string;
+  visits: number;
+  valueSum: number;
+  mean: number;
+}
+
+export interface BotSearchTrace {
+  /** Ranked root-candidate statistics backing the chosen move. */
+  topActions: BotSearchTraceAction[];
+  determinizations: number;
+}
+
 export interface BotDecision {
   move: BotMove;
   modelVersion: string;
@@ -55,6 +69,8 @@ export interface BotDecision {
   elapsedMs: number;
   timedOut: boolean;
   fallbackLevel: 0 | 1 | 2;
+  /** Optional search internals for the /bot insight page. */
+  searchTrace?: BotSearchTrace;
 }
 
 /** Small context subset needed to decide and advance a simulation. */

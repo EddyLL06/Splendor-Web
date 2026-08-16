@@ -246,20 +246,32 @@ Design constraints:
 - **Expert = ds-search-v1 (pure search + simulation, no neural networks).**
   Each decision determinizes the hidden deck several times, runs a PUCT MCTS
   tree over both players' moves in every determinization, extends leaves with
-  fast greedy rollouts once the game nears the 15-prestige race, and picks the
-  root move with the best mean value across determinizations. Determinizations
-  are split across the worker pool, so `AI_BOT_WORKERS=3` on a 3-vCPU Railway
-  service uses all cores for one 2-player bot decision within the
-  `AI_BOT_EXPERT_MAX_MS=5000` budget. Expert decisions start computing during
-  the presentation "thinking" delay, so a move takes ~max(delay, search)
-  instead of the sum. The legacy neural Expert (ONNX PUCT) is fully disabled;
-  its files remain in the repo but are never loaded at runtime.
+  exact 1–3-ply tuned lookahead (and fast greedy rollouts once the game nears
+  the 15-prestige race), and picks the root move with the best mean value
+  across determinizations. Determinizations are split across the worker pool,
+  so `AI_BOT_WORKERS=3` on a 3-vCPU Railway service uses all cores for one
+  2-player bot decision within the `AI_BOT_EXPERT_MAX_MS=5000` budget. Expert
+  decisions start computing during the presentation "thinking" delay, so a
+  move takes ~max(delay, search) instead of the sum. The legacy neural Expert
+  (ONNX PUCT) is fully disabled; its files remain in the repo but are never
+  loaded at runtime.
 - The heuristic model is a single versioned JSON file:
   `ai_bot/models/heuristic-v1.json`. At startup the server verifies its rules
   fingerprint against the deployed rule sources and logs a warning on
   mismatch; a missing/corrupt model falls back to built-in hand-tuned weights
   without breaking human play. These weights seed the search's leaf
   evaluation and priors.
+
+## Bot insight page (`/bot`)
+
+`/bot/?match=<room code>` shows how the Expert bot thinks, move by move —
+designed for humans: a live game snapshot (scores, tokens, bonuses, pending
+steps), one card per bot decision with the chosen move in plain language, the
+ranked candidate actions as visit/mean-value bars, and an auto-generated
+"why this move" paragraph (simulations, determinizations, timeouts,
+fallbacks). Players and spectators of the match can read it; others get 403.
+The data is public-information only — deck order and blind reservations are
+never exposed.
 
 Rollback options (no database migration involved):
 

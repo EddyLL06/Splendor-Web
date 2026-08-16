@@ -38,6 +38,7 @@ import type { AIObservation } from '../../shared/ai/observation.js';
 import type { SplendorState } from '../../shared/types/game.js';
 import type { AiWorkerPool } from './worker-pool.js';
 import type { AiMetrics } from './metrics.js';
+import type { BotTraceStore } from './bot-trace.js';
 
 type GameClient = ReturnType<typeof Client<SplendorState>>;
 
@@ -70,6 +71,8 @@ export interface BotControllerOptions {
   expertSims: number;
   expertDeterminizations: number;
   metrics?: AiMetrics;
+  /** Records each decision for the human-readable /bot insight page. */
+  traceStore?: BotTraceStore;
 }
 
 export class BotController {
@@ -222,6 +225,23 @@ export class BotController {
       if (this.lastStateID !== stateID) {
         this.options.metrics?.recordStaleResult();
         return;
+      }
+      if (this.options.traceStore && this.options.difficulty === 'expert') {
+        this.options.traceStore.record(this.options.matchID, {
+          playerID,
+          stateID,
+          move: decision.move,
+          policy: decision.policy,
+          modelVersion: decision.modelVersion,
+          sims: decision.nodesVisited,
+          elapsedMs: decision.elapsedMs,
+          timedOut: decision.timedOut,
+          fallbackLevel: decision.fallbackLevel,
+          determinizations:
+            decision.searchTrace?.determinizations ??
+            this.options.expertDeterminizations,
+          topActions: decision.searchTrace?.topActions ?? [],
+        });
       }
       const moveType = decision.move.move;
       const args = decision.move.args;

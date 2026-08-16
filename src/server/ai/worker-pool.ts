@@ -180,7 +180,7 @@ export class AiWorkerPool {
       throw (firstRejection?.reason as Error) ??
         new Error('AI_BOT_WORKER_EMPTY_RESPONSE');
     }
-    return mergeDsSearchResults(results, input.seed);
+    return mergeDsSearchResults(results, input.seed, detTotal);
   }
 
   /**
@@ -358,6 +358,7 @@ export const workerEntryFor = (): string => {
 export const mergeDsSearchResults = (
   results: DsSearchResult[],
   seed: string,
+  determinizations: number,
 ): BotDecision => {
   const agg = new Map<string, { visits: number; valueSum: number }>();
   const movesByKey: Record<string, BotDecision['move']> = {};
@@ -400,5 +401,14 @@ export const mergeDsSearchResults = (
     elapsedMs: Math.round(elapsedMs * 100) / 100,
     timedOut,
     fallbackLevel: timedOut ? 1 : 0,
+    searchTrace: {
+      determinizations,
+      topActions: ranked.slice(0, 8).map(([actionKey, entry]) => ({
+        actionKey,
+        visits: entry.visits,
+        valueSum: entry.valueSum,
+        mean: entry.valueSum / Math.max(1, entry.visits),
+      })),
+    },
   };
 };
