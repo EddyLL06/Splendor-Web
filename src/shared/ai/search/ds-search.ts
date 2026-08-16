@@ -76,8 +76,9 @@ export const DS_SEARCH_CONSTANTS = {
   EVAL_SCALE: 40,
   /** tanh input scale for one-ply q0 scores (tuned-eval magnitude). */
   Q0_SCALE: Number(process.env.DS_Q0_SCALE ?? '15'),
-  /** PUCT exploration weight. */
-  EXPLORE_C: 1.2,
+  /** PUCT exploration weight (0.5: tuned — lower noise complements the
+   * sharp best2ply leaf values; see A/B results in DEVELOPMENT_GUIDE). */
+  EXPLORE_C: Number(process.env.DS_EXPLORE_C ?? '0.5'),
   /** Prior softmax temperature. */
   PRIOR_TEMP: 3,
   /**
@@ -704,12 +705,6 @@ const rollout = (
   }
   return leafValue(sim.G, botID, weights);
 };
-
-interface MctsStats {
-  sims: number;
-  nodes: number;
-  timedOut: boolean;
-}
 
 interface MctsTree {
   root: DsNode;

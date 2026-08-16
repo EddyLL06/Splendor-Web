@@ -176,7 +176,7 @@ export const chooseBotMove = (
     const v2RootMinVisits = Number(process.env.DS_V2_ROOT_MIN ?? '0');
     const v2RoundRobin = process.env.DS_V2_RR !== 'false';
     const v2Dets = Number(process.env.DS_V2_DETS ?? '3');
-    const v2ExploreC = Number(process.env.DS_V2_EXPLORE_C ?? '1.2');
+    const v2ExploreC = Number(process.env.DS_V2_EXPLORE_C ?? '0.5');
     const v2Q0Scale = Number(process.env.DS_V2_Q0 ?? '15');
     const v2PriorTemp = Number(process.env.DS_V2_PRIOR_TEMP ?? '3');
     const v2Weights = (process.env.DS_V2_WEIGHTS ?? '')

@@ -523,13 +523,17 @@ Expert 难度只使用纯搜索 + 对局模拟（`src/shared/ai/search/ds-search
    `ROOT_MIN_VISITS` 次访问前强制覆盖所有根着法，防漏战术。
 3. **叶子前瞻（bestNply）**：叶子值 = 用近似分数选出最佳着法/对手最佳回应、
    真实应用后再用**精确调优模型**评估（`LEAF_MODE=best2ply` 为当前默认；
-   bestply/best3ply/static 可选）。终局竞速：任一方 ≥ 12 分（或树深 ≥ 24）时
-   叶子改用调优策略的快速贪心 rollout 模拟到终局，直接推演“谁先到 15”。
+   bestply/best3ply/static/auto2 可选），前瞻路径做双展开（回应排名直接挂进树）。
+   终局竞速：任一方 ≥ 12 分（或树深 ≥ 24）时叶子改用调优策略的快速贪心 rollout
+   模拟到终局，直接推演“谁先到 15”。PUCT 探索系数默认 **0.5**（`DS_EXPLORE_C`，
+   低探索噪声与尖锐的 best2ply 叶子值互补）。
 4. **聚合**：所有确定化（以及所有 worker 线程）的根动作 (visits, valueSum)
    求和，按平均价值 → 访问数 → actionKey 排序选出着法；结果对同 seed 确定。
 
-A/B 基准（2 人、双方 800ms、12 局）：best2ply + 3 确定化 round-robin 的
-ds-search-v2 对冻结基线 ds-search-v1（static 叶子 + 单确定化）胜率 **91.7%**。
+A/B 基准（2 人、双方 800ms）：ds-search-v2（best2ply + 3 确定化 round-robin +
+exploreC 0.5）对冻结基线 ds-search-v1（static 叶子 + 单确定化 + exploreC 1.2）
+**80.6%（29/36）**；12 局短样本 83.3%。否决项：oneply/auto2 叶子、exploreC
+0.3/1.8、priorTemp 5、rootmin 强制覆盖、RR2/RR4、SO-MCTS 共享根。
 
 预算由 `AI_BOT_EXPERT_MAX_MS`（墙钟）、`AI_BOT_EXPERT_SIMS`（模拟上限）与
 `AI_BOT_EXPERT_DETERMINIZATIONS`（确定化数）控制。`predictChildPlayer` 用无克隆的
