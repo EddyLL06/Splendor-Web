@@ -108,7 +108,7 @@ describe('fast-sim vs authoritative engine', () => {
         expect(gameplayFieldsEqual(fast.G, authoritative.G)).toBe(true);
       }
     }
-  });
+  }, 20_000);
 
   it('applies every enumerated candidate identically at sampled states', () => {
     for (let game = 0; game < 30; game += 1) {

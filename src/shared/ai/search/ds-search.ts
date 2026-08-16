@@ -75,7 +75,7 @@ export const DS_SEARCH_CONSTANTS = {
   /** tanh input scale for linear-eval leaf values (smaller = more decisive). */
   EVAL_SCALE: 40,
   /** tanh input scale for one-ply q0 scores (tuned-eval magnitude). */
-  Q0_SCALE: 15,
+  Q0_SCALE: Number(process.env.DS_Q0_SCALE ?? '15'),
   /** PUCT exploration weight. */
   EXPLORE_C: 1.2,
   /** Prior softmax temperature. */
@@ -89,12 +89,20 @@ export const DS_SEARCH_CONSTANTS = {
    * - 'oneply': use the approximate one-ply score itself as the value
    *   (experimental; usually weaker than the exact-eval modes).
    */
-  LEAF_MODE: (process.env.DS_LEAF_MODE ?? 'static') as
+  LEAF_MODE: (process.env.DS_LEAF_MODE ?? 'best2ply') as
     | 'static'
     | 'bestply'
     | 'best2ply'
     | 'best3ply'
+    | 'auto2'
     | 'oneply',
+  /**
+   * auto2 mode: use 2-ply lookahead when the top-2 q0 gap is at most this
+   * value (close decisions need tactics), static eval otherwise.
+   */
+  AUTO2_GAP: Number(process.env.DS_AUTO2_GAP ?? '0.12'),
+  /** auto2 mode: always use 2-ply lookahead at/above this max score. */
+  AUTO2_SCORE: Number(process.env.DS_AUTO2_SCORE ?? '10'),
   /**
    * Minimum visits per root child before pure PUCT selection kicks in.
    * Guards against tactic misses hidden behind low-prior root moves.
@@ -146,14 +154,24 @@ export interface DsSearchBudget {
   detIndex: number;
   /** Number of determinizations owned by this worker slice. */
   detCount: number;
-  /** Leaf value mode override ('static' | 'bestply' | 'best2ply' | 'oneply'). */
-  leafMode?: 'static' | 'bestply' | 'best2ply' | 'best3ply' | 'oneply';
+  /** Leaf value mode override ('static' | 'bestply' | 'best2ply' | 'best3ply' | 'auto2' | 'oneply'). */
+  leafMode?: 'static' | 'bestply' | 'best2ply' | 'best3ply' | 'auto2' | 'oneply';
   /** Minimum visits per root child before pure PUCT selection. */
   rootMinVisits?: number;
   /** Round-robin determinization scheduling. */
   roundRobin?: boolean;
   /** Simulations per determinization per round-robin slice. */
   simsPerSlice?: number;
+  /** PUCT exploration weight override. */
+  exploreC?: number;
+  /** One-ply q0 tanh scale override. */
+  q0Scale?: number;
+  /** Prior softmax temperature override. */
+  priorTemp?: number;
+  /** Per-determinization round-robin weights (e.g. [2,1,1]). */
+  detWeights?: number[];
+  /** Shared-root SO-MCTS: one tree over all determinizations. */
+  soMcts?: boolean;
 }
 
 export interface DsSearchDecisionInput {
@@ -480,6 +498,7 @@ const priorsFor = (
   ctx: BoardContextView,
   candidates: AIActionCandidate[],
   weights: Record<string, number>,
+  temp: number = DS_SEARCH_CONSTANTS.PRIOR_TEMP,
 ): { priors: number[]; scores: number[] } => {
   const baseFeatures = extractFeatures(state, playerID);
   let baseEval = 0;
@@ -498,7 +517,6 @@ const priorsFor = (
     ),
   );
   const min = Math.min(...scores);
-  const temp = DS_SEARCH_CONSTANTS.PRIOR_TEMP;
   const shifted = scores.map((score) => Math.exp((score - min) / temp));
   const total = shifted.reduce((sum, value) => sum + value, 0);
   return {
@@ -579,6 +597,11 @@ interface DsNode {
   action: AIActionCandidate | null;
   playerID: PlayerID;
   depth: number;
+  /** Determinization index the node was expanded under (undefined = shared
+   * root level, valid across all worlds). */
+  world?: number;
+  /** World the children list belongs to (for cross-world gating). */
+  childrenWorld?: number;
   visits: number;
   valueSum: number;
   /** One-ply eval prior used as the Q estimate before the first real visit. */
@@ -697,13 +720,14 @@ interface MctsTree {
 }
 
 const createMctsTree = (
-  rootState: SplendorState,
+  rootStates: SplendorState[],
   ctx: BoardContextView,
   botID: PlayerID,
   weights: Record<string, number>,
   simSeed: string,
   budget: DsSearchBudget,
 ): MctsTree => {
+  const rootState = rootStates[0];
   const root: DsNode = {
     action: null,
     playerID: ctx.currentPlayer,
@@ -720,19 +744,25 @@ const createMctsTree = (
   const leafMode = budget.leafMode ?? DS_SEARCH_CONSTANTS.LEAF_MODE;
   const rootMinVisits =
     budget.rootMinVisits ?? DS_SEARCH_CONSTANTS.ROOT_MIN_VISITS;
+  const exploreC = budget.exploreC ?? DS_SEARCH_CONSTANTS.EXPLORE_C;
+  const q0Scale = budget.q0Scale ?? DS_SEARCH_CONSTANTS.Q0_SCALE;
+  const priorTemp = budget.priorTemp ?? DS_SEARCH_CONSTANTS.PRIOR_TEMP;
 
-  const selectChild = (node: DsNode): DsNode => {
+  const selectChild = (node: DsNode, simWorld: number): DsNode => {
     const perspective = node.playerID === botID ? 1 : -1;
     const logParent = Math.log(node.visits + 1);
     let best: DsNode | undefined;
     let bestScore = Number.NEGATIVE_INFINITY;
-    for (const child of node.children ?? []) {
+    const eligible = (node.children ?? []).filter(
+      (child) => child.world === undefined || child.world === simWorld,
+    );
+    for (const child of eligible) {
       const q =
         child.visits > 0
           ? child.valueSum / child.visits
           : child.q0;
       const u =
-        DS_SEARCH_CONSTANTS.EXPLORE_C *
+        exploreC *
         child.prior *
         Math.sqrt(logParent / (1 + child.visits));
       const score = perspective * q + u;
@@ -741,14 +771,16 @@ const createMctsTree = (
         best = child;
       }
     }
-    if (!best) throw new Error('MCTS selectChild on a node with no children.');
+    if (!best) {
+      throw new Error('MCTS selectChild on a node with no eligible children.');
+    }
     return best;
   };
 
   /** Root coverage: least-visited child first, until every root move has
    * at least rootMinVisits real evaluations. Ties break by PUCT score so
    * the choice stays deterministic and quality-ordered. */
-  const selectRootChild = (): DsNode => {
+  const selectRootChild = (simWorld: number): DsNode => {
     const children = root.children ?? [];
     if (children.length === 0) {
       throw new Error('MCTS selectRootChild on an empty root.');
@@ -759,12 +791,12 @@ const createMctsTree = (
         (child) => child.visits === minVisits,
       );
       if (candidates.length === 1) return candidates[0];
-      return selectChild(root);
+      return selectChild(root, simWorld);
     }
-    return selectChild(root);
+    return selectChild(root, simWorld);
   };
 
-  const expand = (node: DsNode, sim: FastSim): void => {
+  const expand = (node: DsNode, sim: FastSim, simWorld: number): void => {
     // The authoritative sim knows whose decision this is; self-heal if the
     // cheap child-player prediction ever drifts, so a subtree can never
     // silently dead-end on a wrong actor.
@@ -777,6 +809,7 @@ const createMctsTree = (
       ctxOfSim(sim),
       candidates,
       weights,
+      priorTemp,
     );
     const nodeCtx = ctxOfSim(sim);
     node.children = candidates.map((action, index) => ({
@@ -785,12 +818,14 @@ const createMctsTree = (
       depth: node.depth + 1,
       visits: 0,
       valueSum: 0,
-      q0: Math.tanh(
-        (scores[index] ?? 0) / DS_SEARCH_CONSTANTS.Q0_SCALE,
-      ),
+      q0: Math.tanh((scores[index] ?? 0) / q0Scale),
       prior: priors[index] ?? 0,
       children: null,
+      // Root children are shared across determinizations (public state);
+      // deeper nodes only exist in the world they were expanded under.
+      world: node.depth === 0 ? undefined : simWorld,
     }));
+    node.childrenWorld = simWorld;
     nodes += candidates.length;
   };
 
@@ -805,6 +840,96 @@ const createMctsTree = (
     depth >= DS_SEARCH_CONSTANTS.ROLLOUT_MIN_DEPTH ||
     maxScoreOf(sim.G) >= DS_SEARCH_CONSTANTS.ROLLOUT_ENDGAME_SCORE;
 
+  /**
+   * Best-reply lookahead from an expanded node: repeatedly apply the
+   * highest-q0 move (tuned approximate ranking), attaching the reply
+   * ranking to the tree as we descend (double expansion), then evaluate the
+   * final position with the exact tuned model. Returns the value and pushes
+   * the descended node onto the backup path.
+   */
+  const bestPlyLookahead = (
+    sim: FastSim,
+    node: DsNode,
+    plies: number,
+    path: DsNode[],
+    simWorld: number,
+  ): number => {
+    let leafSim = sim;
+    let children: DsNode[] | null = node.children!;
+    let descendedNode: DsNode | null = null;
+    let guard = 0;
+    let settled = false;
+    let lookaheadValue = 0;
+    while (
+      guard < plies &&
+      children !== null &&
+      children.length > 0 &&
+      !settled
+    ) {
+      let best = children[0];
+      for (const child of children) {
+        if (child.q0 > best.q0) best = child;
+      }
+      if (!applyFastMove(leafSim, leafSim.currentPlayer, best.action!.move)) {
+        settled = true;
+        lookaheadValue = leafValue(sim.G, botID, weights);
+        break;
+      }
+      if (leafSim.G.result !== null) {
+        settled = true;
+        lookaheadValue = terminalValue(leafSim.G, botID);
+        break;
+      }
+      guard += 1;
+      descendedNode = best;
+      if (guard < plies) {
+        const actor = leafSim.currentPlayer;
+        const candidates = enumerateLegalActions(leafSim.G, actor, actor);
+        if (candidates.length === 0) {
+          settled = true;
+          lookaheadValue = leafValue(leafSim.G, botID, weights);
+          break;
+        }
+        const { priors: replyPriors, scores } = priorsFor(
+          leafSim.G,
+          actor,
+          ctxOfSim(leafSim),
+          candidates,
+          weights,
+          priorTemp,
+        );
+        const replyChildren: DsNode[] = candidates.map((action, index) => ({
+          action,
+          playerID: predictChildPlayer(
+            leafSim.G,
+            actor,
+            ctxOfSim(leafSim),
+            action.move,
+          ),
+          depth: (best.depth ?? 0) + 1,
+          visits: 0,
+          valueSum: 0,
+          q0: Math.tanh((scores[index] ?? 0) / q0Scale),
+          prior: replyPriors[index] ?? 0,
+          children: null,
+          world: simWorld,
+        }));
+        // Double expansion: attach the reply ranking to the tree so future
+        // simulations descend this line without re-scoring.
+        if (best.children === null) {
+          best.children = replyChildren;
+          best.childrenWorld = simWorld;
+          nodes += replyChildren.length;
+        }
+        children = replyChildren;
+      }
+    }
+    // The final applied node is a real tree node: back up the leaf value
+    // through it so its Q reflects the lookahead result.
+    if (descendedNode !== null) path.push(descendedNode);
+    return settled ? lookaheadValue : leafValue(leafSim.G, botID, weights);
+  };
+
   const runSlice = (maxSimulations: number, deadlineEpochMs: number): void => {
     const target = sims + Math.max(0, maxSimulations);
     while (sims < target && nodes < DS_SEARCH_CONSTANTS.MAX_NODES) {
@@ -816,7 +941,11 @@ const createMctsTree = (
         timedOut = true;
         return;
       }
-      const sim = createFastSimulation(cloneStateFast(rootState), ctx);
+      const simWorld = sims % rootStates.length;
+      const sim = createFastSimulation(
+        cloneStateFast(rootStates[simWorld]),
+        ctx,
+      );
       const path: DsNode[] = [];
       let node = root;
       let value: number;
@@ -826,7 +955,7 @@ const createMctsTree = (
           break;
         }
         if (node.children === null) {
-          expand(node, sim);
+          expand(node, sim, simWorld);
           path.push(node);
           if (node.children!.length === 0) {
             // No legal action at this node: treat it as a leaf.
@@ -836,85 +965,28 @@ const createMctsTree = (
           if (shouldRollout(sim, node.depth)) {
             const rng = createSeededRNG(`${simSeed}:roll:${sims}`);
             value = rollout(sim, botID, weights, rng, deadlineEpochMs);
-          } else if (
-            leafMode === 'bestply' ||
-            leafMode === 'best2ply' ||
-            leafMode === 'best3ply'
-          ) {
-            // Real 1-3-ply-deeper lookahead: apply the highest-ranked child
-            // move (by tuned approximate score), the opponent's best reply,
-            // etc., and evaluate the resulting position with the EXACT tuned
-            // model.
-            const plies =
-              leafMode === 'best3ply' ? 3 : leafMode === 'best2ply' ? 2 : 1;
-            let leafSim = sim;
-            let children: DsNode[] | null = node.children!;
-            let guard = 0;
-            let settled = false;
-            let lookaheadValue = 0;
-            while (
-              guard < plies &&
-              children !== null &&
-              children.length > 0 &&
-              !settled
+          } else if (leafMode === 'bestply' || leafMode === 'best2ply') {
+            const plies = leafMode === 'best2ply' ? 2 : 1;
+            value = bestPlyLookahead(sim, node, plies, path, simWorld);
+          } else if (leafMode === 'best3ply') {
+            value = bestPlyLookahead(sim, node, 3, path, simWorld);
+          } else if (leafMode === 'auto2') {
+            // Adaptive: expensive 2-ply lookahead only for close/tactical
+            // decisions and the endgame race; static eval elsewhere so the
+            // tree can spend the recovered budget on more simulations.
+            const sorted = [...node.children!].sort(
+              (left, right) => right.q0 - left.q0,
+            );
+            const gap =
+              (sorted[0]?.q0 ?? 0) - (sorted[1]?.q0 ?? 0);
+            if (
+              gap <= DS_SEARCH_CONSTANTS.AUTO2_GAP ||
+              maxScoreOf(sim.G) >= DS_SEARCH_CONSTANTS.AUTO2_SCORE
             ) {
-              let best = children[0];
-              for (const child of children) {
-                if (child.q0 > best.q0) best = child;
-              }
-              if (
-                !applyFastMove(
-                  leafSim,
-                  leafSim.currentPlayer,
-                  best.action!.move,
-                )
-              ) {
-                settled = true;
-                lookaheadValue = leafValue(sim.G, botID, weights);
-                break;
-              }
-              if (leafSim.G.result !== null) {
-                settled = true;
-                lookaheadValue = terminalValue(leafSim.G, botID);
-                break;
-              }
-              guard += 1;
-              if (guard < plies) {
-                const actor = leafSim.currentPlayer;
-                const candidates = enumerateLegalActions(
-                  leafSim.G,
-                  actor,
-                  actor,
-                );
-                if (candidates.length === 0) {
-                  settled = true;
-                  lookaheadValue = leafValue(leafSim.G, botID, weights);
-                  break;
-                }
-                const { scores } = priorsFor(
-                  leafSim.G,
-                  actor,
-                  ctxOfSim(leafSim),
-                  candidates,
-                  weights,
-                );
-                children = candidates.map((action, index) => ({
-                  action,
-                  playerID: actor,
-                  depth: 0,
-                  visits: 0,
-                  valueSum: 0,
-                  q0: Math.tanh(
-                    (scores[index] ?? 0) / DS_SEARCH_CONSTANTS.Q0_SCALE,
-                  ),
-                  prior: 0,
-                  children: null,
-                }));
-              }
+              value = bestPlyLookahead(sim, node, 2, path, simWorld);
+            } else {
+              value = leafValue(sim.G, botID, weights);
             }
-            value = settled
-              ? lookaheadValue
-              : leafValue(leafSim.G, botID, weights);
           } else if (leafMode === 'oneply') {
             // One-ply tuned lookahead at the leaf: the best continuation was
             // already scored at expansion time; opponent-owned nodes negate
@@ -928,7 +1000,27 @@ const createMctsTree = (
           }
           break;
         }
-        const child = node === root ? selectRootChild() : selectChild(node);
+        // A node expanded under a different determinization is not valid
+        // here: evaluate the current world's position as a leaf. Shared root
+        // children (depth 1) stay traversable; their per-world child lists
+        // are gated by childrenWorld.
+        if (node.world !== undefined && node.world !== simWorld) {
+          value = leafValue(sim.G, botID, weights);
+          break;
+        }
+        if (
+          node.depth > 0 &&
+          node.children !== null &&
+          node.childrenWorld !== undefined &&
+          node.childrenWorld !== simWorld
+        ) {
+          value = leafValue(sim.G, botID, weights);
+          break;
+        }
+        const child =
+          node === root
+            ? selectRootChild(simWorld)
+            : selectChild(node, simWorld);
         path.push(node);
         if (!applyMove(sim, sim.currentPlayer, child.action!.move)) {
           // Defensive: an illegal child means prediction drifted; evaluate
@@ -1016,36 +1108,62 @@ export const computeDsSearchDecision = (
   const simsPerSlice =
     budget.simsPerSlice ?? DS_SEARCH_CONSTANTS.SIMS_PER_SLICE;
 
-  // Build one persistent tree per determinization.
-  const trees: MctsTree[] = [];
+  // Build one persistent tree per determinization (or a single shared-root
+  // tree over all determinizations in SO-MCTS mode).
+  const soMcts = budget.soMcts ?? false;
+  const detStates: SplendorState[] = [];
   for (let det = detIndex; det < detIndex + detCount; det += 1) {
     const rng = createSeededRNG(`ds:${seed}:${det}`);
-    const rootState = determinize(observation, rng);
-    trees.push(
-      createMctsTree(rootState, ctx, botID, weights, `ds:${seed}:${det}`, budget),
-    );
+    detStates.push(determinize(observation, rng));
   }
+  const trees: MctsTree[] = soMcts
+    ? [
+        createMctsTree(
+          detStates,
+          ctx,
+          botID,
+          weights,
+          `ds:${seed}:${detIndex}`,
+          budget,
+        ),
+      ]
+    : detStates.map((rootState, index) =>
+        createMctsTree(
+          [rootState],
+          ctx,
+          botID,
+          weights,
+          `ds:${seed}:${detIndex + index}`,
+          budget,
+        ),
+      );
 
   if (roundRobin) {
-    // Interleaved slices: every determinization gets an equal share of the
-    // wall-clock budget, so no single sampled deck dominates the decision.
+    // Interleaved slices: every determinization gets a share of the
+    // wall-clock budget (detWeights can give some decks more depth), so no
+    // single sampled deck dominates the decision.
+    const detWeights = budget.detWeights ?? trees.map(() => 1);
     outer: while (
       totalSims < maxSimulations &&
       performance.now() < deadline
     ) {
-      for (const tree of trees) {
-        const remaining = maxSimulations - totalSims;
-        if (remaining <= 0) {
-          timedOut = true;
-          break outer;
-        }
-        const before = tree.sims;
-        tree.runSlice(Math.min(remaining, simsPerSlice), deadline);
-        totalSims += tree.sims - before;
-        if (tree.timedOut) timedOut = true;
-        if (performance.now() >= deadline) {
-          timedOut = true;
-          break outer;
+      for (let index = 0; index < trees.length; index += 1) {
+        const tree = trees[index];
+        const rounds = Math.max(1, detWeights[index] ?? 1);
+        for (let round = 0; round < rounds; round += 1) {
+          const remaining = maxSimulations - totalSims;
+          if (remaining <= 0) {
+            timedOut = true;
+            break outer;
+          }
+          const before = tree.sims;
+          tree.runSlice(Math.min(remaining, simsPerSlice), deadline);
+          totalSims += tree.sims - before;
+          if (tree.timedOut) timedOut = true;
+          if (performance.now() >= deadline) {
+            timedOut = true;
+            break outer;
+          }
         }
       }
     }

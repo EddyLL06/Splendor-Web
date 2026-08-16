@@ -170,11 +170,20 @@ export const chooseBotMove = (
         | 'bestply'
         | 'best2ply'
         | 'best3ply'
+        | 'auto2'
         | 'oneply'
-        | undefined) ?? 'static';
+        | undefined) ?? 'best2ply';
     const v2RootMinVisits = Number(process.env.DS_V2_ROOT_MIN ?? '0');
-    const v2RoundRobin = process.env.DS_V2_RR === 'true';
-    const v2Dets = Number(process.env.DS_V2_DETS ?? '6');
+    const v2RoundRobin = process.env.DS_V2_RR !== 'false';
+    const v2Dets = Number(process.env.DS_V2_DETS ?? '3');
+    const v2ExploreC = Number(process.env.DS_V2_EXPLORE_C ?? '1.2');
+    const v2Q0Scale = Number(process.env.DS_V2_Q0 ?? '15');
+    const v2PriorTemp = Number(process.env.DS_V2_PRIOR_TEMP ?? '3');
+    const v2Weights = (process.env.DS_V2_WEIGHTS ?? '')
+      .split(',')
+      .filter((value) => value.trim() !== '')
+      .map((value) => Number(value.trim()));
+    const v2SoMcts = process.env.DS_V2_SOMCTS === 'true';
     const result = computeDsSearchDecision({
       observation,
       ctx,
@@ -194,6 +203,11 @@ export const chooseBotMove = (
         leafMode: v2 ? v2Leaf : 'static',
         rootMinVisits: v2 ? v2RootMinVisits : 0,
         roundRobin: v2 ? v2RoundRobin : false,
+        exploreC: v2 ? v2ExploreC : 1.2,
+        q0Scale: v2 ? v2Q0Scale : 15,
+        priorTemp: v2 ? v2PriorTemp : 3,
+        detWeights: v2 && v2Weights.length > 0 ? v2Weights : undefined,
+        soMcts: v2 ? v2SoMcts : false,
       },
       memory: options.memory,
     });

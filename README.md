@@ -224,6 +224,8 @@ See `.env.example`; it contains names and safe defaults only.
 | `AI_BOT_EXPERT_DETERMINIZATIONS` | `9` | Seeded hidden-state determinizations per expert decision |
 | `AI_BOT_EXPERT_MAX_MS` | `5000` | Expert search wall-clock budget per move |
 | `AI_BOT_NEURAL_MODEL` | *(ignored)* | Legacy ONNX model path; the neural Expert agent is disabled |
+| `DS_LEAF_MODE` | `best2ply` | Leaf value mode: `static`, `bestply`, `best2ply`, `best3ply`, `oneply` |
+| `DS_ROLLOUT_SCORE` | `12` | Either player at/above this score enables endgame rollouts |
 
 Non-test secrets must contain at least 256 bits of random material. Rotate a
 secret deliberately: changing the session or game credential key invalidates

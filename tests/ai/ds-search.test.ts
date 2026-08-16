@@ -172,6 +172,39 @@ describe('ds-search engine', () => {
     expect(elapsedMs).toBeLessThan(1_500);
     expect(applyDecision(state, playerID, decision.move)).toBe(true);
   });
+
+  it('supports shared-root SO-MCTS across determinizations', () => {
+    const { state } = createSeededState(2, 'ds-somcts');
+    const playerID = state.initialFirstPlayer;
+    const observation = createObservation(
+      createPlayerView(state, playerID),
+      playerID,
+      ctxFor(state, playerID),
+    );
+    const run = () =>
+      computeDsSearchDecision({
+        observation,
+        ctx: ctxFor(state, playerID),
+        seed: 'ds-somcts-seed',
+        weights,
+        budget: {
+          deadlineEpochMs: performance.now() + 250,
+          maxSimulations: 1200,
+          determinizations: 3,
+          detIndex: 0,
+          detCount: 3,
+          soMcts: true,
+          leafMode: 'best2ply',
+          roundRobin: true,
+        },
+      });
+    const first = run();
+    const second = run();
+    expect(applyDecision(state, playerID, first.decision.move)).toBe(true);
+    expect(first.decision.nodesVisited).toBeGreaterThan(0);
+    // Deterministic move for the same (observation, seed).
+    expect(second.decision.move).toEqual(first.decision.move);
+  });
 });
 
 describe('predictChildPlayer', () => {

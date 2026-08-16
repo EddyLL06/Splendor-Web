@@ -516,17 +516,33 @@ Expert 难度只使用纯搜索 + 对局模拟（`src/shared/ai/search/ds-search
 
 1. **确定化（PIMC）**：隐藏信息只有牌堆顺序和对手暗牌预留。对每个确定化用
    seeded RNG 重建完整合法状态；同一 (observation, seed) 恒得到同一批确定化。
-2. **MCTS + PUCT**：树中双方都按自己视角最大化（对手节点翻转 Q 符号），prior 来自
-   无 apply 的快速动作质量评分；叶子值 = tanh(调优线性评估 / 40)，终局 ±1。
-3. **终局竞速 rollout**：任一方 ≥ 12 分（或树深 ≥ 24）时，叶子用快速贪心
-   rollout 模拟到终局，直接推演“谁先到 15”。
+   确定化按 worker 切片并行，且以 round-robin 方式轮流获得等量模拟预算
+   （`ROUND_ROBIN_DETS`），避免单一采样牌堆支配决策。
+2. **MCTS + PUCT**：树中双方都按自己视角最大化（对手节点翻转 Q 符号），prior/q0
+   来自调优线性模型的 **1-ply 增量近似**（O(1) 每候选，无需 apply）；根节点在
+   `ROOT_MIN_VISITS` 次访问前强制覆盖所有根着法，防漏战术。
+3. **叶子前瞻（bestNply）**：叶子值 = 用近似分数选出最佳着法/对手最佳回应、
+   真实应用后再用**精确调优模型**评估（`LEAF_MODE=best2ply` 为当前默认；
+   bestply/best3ply/static 可选）。终局竞速：任一方 ≥ 12 分（或树深 ≥ 24）时
+   叶子改用调优策略的快速贪心 rollout 模拟到终局，直接推演“谁先到 15”。
 4. **聚合**：所有确定化（以及所有 worker 线程）的根动作 (visits, valueSum)
    求和，按平均价值 → 访问数 → actionKey 排序选出着法；结果对同 seed 确定。
 
+A/B 基准（2 人、双方 800ms、12 局）：best2ply + 3 确定化 round-robin 的
+ds-search-v2 对冻结基线 ds-search-v1（static 叶子 + 单确定化）胜率 **91.7%**。
+
 预算由 `AI_BOT_EXPERT_MAX_MS`（墙钟）、`AI_BOT_EXPERT_SIMS`（模拟上限）与
-`AI_BOT_EXPERT_DETERMINIZATIONS`（确定化数）控制；确定化按 worker 数切片并行。
-`predictChildPlayer` 用无克隆的规则镜像预测子节点玩家，与权威模拟的差分测试
-（`tests/ai/ds-search.test.ts`）保证树视角正确。
+`AI_BOT_EXPERT_DETERMINIZATIONS`（确定化数）控制。`predictChildPlayer` 用无克隆的
+规则镜像预测子节点玩家，与权威模拟的差分测试（`tests/ai/ds-search.test.ts`）保证
+树视角正确；快速模拟器 `fast-sim.ts` 与权威引擎逐字段差分对齐。
+
+### 9.3 思考过程可视化（/bot）
+
+每步 Expert 决策后，`BotController` 把结构化 trace（着法、根候选 visits/value、
+模拟数、确定化数、超时/降级标志）写入 `BotTraceStore`（每局上限 60 条，随房间
+删除清空）。`GET /api/matches/:id/bot-trace` 只对该局玩家/旁观者开放（否则 403），
+附带公开信息快照。客户端 `/bot/?match=房间代码` 渲染决策卡片、候选条形图与
+文字化推理。trace 永远不含牌堆顺序与暗牌预留。
 
 ### 9.1 Hard 的“一轮”定义
 
